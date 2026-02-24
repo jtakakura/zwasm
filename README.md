@@ -3,6 +3,7 @@
 [![CI](https://github.com/clojurewasm/zwasm/actions/workflows/ci.yml/badge.svg)](https://github.com/clojurewasm/zwasm/actions/workflows/ci.yml)
 [![Spec Tests](https://img.shields.io/badge/spec_tests-62%2C158%2F62%2C158-brightgreen)](https://github.com/clojurewasm/zwasm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![GitHub Sponsors](https://img.shields.io/github/sponsors/chaploud?logo=githubsponsors&logoColor=white&color=ea4aaa)](https://github.com/sponsors/chaploud)
 
 A small, fast WebAssembly runtime written in Zig. Library and CLI.
 
