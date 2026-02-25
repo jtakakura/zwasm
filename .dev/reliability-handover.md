@@ -1,106 +1,63 @@
-# Reliability Check — Session Handover
+# Reliability — Session Handover
 
-> Progress tracker for `.dev/reliability-plan.md`.
-> Read plan for full context. Update after each phase.
+> Plan: `@./.dev/reliability-plan.md`. Rules: `@./.claude/rules/reliability-work.md`.
 
 ## Branch
 `strictly-check/reliability-003` (from main at d55a72b)
 
-Branch naming: `-001`, `-002`, ... (sequential). See CLAUDE.md § Reliability Work Branch Strategy.
+## Progress
 
-## Progress Tracker
+### ✅ Completed
+- A-F: Environment, compilation, compat, E2E expansion, benchmarks, analysis, W34 fix
+- G.1-G.3: Ubuntu spec 62,158/62,158 (100%). Real-world: all pass without JIT, 6/9 fail with JIT → Phase J
 
-- [x] A.1: Create feature branch
-- [x] A.2: Expand flake.nix (Go, wasi-sdk 30)
-- [ ] A.3: Verify flake.nix on Ubuntu
-- [x] B.1: Rust programs → wasm32-wasip1
-- [x] B.2: Go programs → wasip1/wasm
-- [x] B.3: C programs → wasm32-wasi
-- [x] B.4: C++ programs → wasm32-wasi
-- [x] B.5: Build automation script
-- [x] C.1: Compatibility test runner
-- [x] C.2: Fix compatibility failures (W34 root cause + test fixes)
-- [x] C.3: Document unsupported cases (FP precision only)
-- [x] D.1: Fix existing E2E failures (was already 356/356)
-- [x] D.2: Feature-specific E2E tests (53 proposal tests added, 724/778 pass)
-- [x] D.3: Update E2E runner (named module auto-register, GC ref types, table index fix)
-- [x] E.1: Real-world benchmarks (6 Rust/C/C++ benchmarks in Layer 5)
-- [x] E.2: Benchmark harness update (Layer 5 in compare_runtimes.sh + run_bench.sh)
-- [x] E.3: Fair benchmark audit (5 runs / 3 warmup default)
-- [x] E.4: Record baseline (runtime_comparison.yaml updated)
-- [ ] F.1: Analyze weak spots
-- [ ] F.2: Profile and optimize
-- [x] F.3: JIT back-edge reentry fix (W34)
-- [ ] G.1: Push and pull on Ubuntu
-- [ ] G.2: Build and test on Ubuntu
-- [ ] G.3: Real-world wasm on Ubuntu
-- [ ] G.4: Benchmarks on Ubuntu
-- [ ] G.5: Fix Ubuntu-only failures
+### Active / TODO
+
+**Phase I: E2E 100% + FP correctness**
+- [ ] I.0: FP precision root cause (c_math_compute diff — bug, not acceptable)
+- [ ] I.1: Typed funcref validation (30 assert_invalid)
+- [ ] I.2: Import type checking (7 assert_unlinkable)
+- [ ] I.3: Memory64 bounds edge cases (9 failures)
+- [ ] I.4: GC ref.test type combinations (2 failures)
+- [ ] I.5: GC array-alloc-too-large (2 failures)
+- [ ] I.6: Memory64 linking validation (3 failures)
+- [ ] I.7: Threads SB_atomic ordering (1 failure)
+
+**Phase J: x86_64 JIT bug fixes**
+- [ ] J.1: Investigate x86_64 JIT codegen crash patterns
+- [ ] J.2: Fix x86_64 JIT bugs
+- [ ] J.3: Verify all real-world pass on Ubuntu with JIT
+
+**Phase K: Performance optimization (target: all ≤1.5x wasmtime)**
+- [ ] K.1: JIT call threshold tuning
+- [ ] K.2: Library function JIT coverage (try 2-3 approaches)
+- [ ] K.3: Register allocation for f64-heavy code
+- [ ] K.4: GC allocation optimization
+- [ ] K.5: Benchmark re-recording on BOTH platforms
+
+**Phase H: Documentation (LAST — requires Phase H Gate pass, see plan)**
+- [ ] H.0: Phase H Gate — all 9 conditions verified (see `@./.dev/reliability-plan.md`)
 - [ ] H.1: Audit README claims
 - [ ] H.2: Fix discrepancies
 - [ ] H.3: Update benchmark table
 
-## Current Phase
-C complete. F.3 done (W34 root cause fixed). Merged to main (86e0490).
-Now on reliability-002.
-Phases A-E complete, F.3 done. Next: F.1 (analyze weak spots) or G (Ubuntu).
+## Next session: start here
 
-## W34 Root Cause Analysis
+1. **Commit** the uncommitted plan/doc/script changes on `strictly-check/reliability-003`
+   (reliability-plan.md, reliability-handover.md, memo.md, bench/run_bench.sh,
+   .claude/rules/reliability-work.md — plan revision, no code changes)
+2. **G.4: Ubuntu benchmarks** — not yet completed (previous SSH timed out).
+   Re-run: `ssh ubuntu ... bash bench/run_bench.sh --quick` in background.
+   Do NOT wait — proceed to Phase I or J while it runs.
+3. **Start Phase I or J** (whichever is easiest to unblock first).
+   I and J can proceed in parallel. See plan for task details.
 
-The bug was NOT in JIT code generation. It was a back-edge JIT restart issue:
+## x86_64 JIT failures (Phase J input)
+All PASS with `--profile` (JIT disabled). Failures with JIT:
+- cpp_string_ops: Arithmetic exception (signal 6)
+- c_string_processing, cpp_vector_sort: OOB memory access
+- go_hello_wasi, go_json_marshal, go_sort_benchmark: OOB memory access
 
-1. C/C++ WASI programs have a reentry guard in `_start` (`__wasm_call_ctors`):
-   `if (flag != 0) unreachable; flag = 1;`
-2. The interpreter runs the function, sets flag = 1, then back-edge JIT triggers
-3. JIT compiles the function and **restarts from the beginning**
-4. On restart, the JIT reads the flag (now 1), hits the guard → `unreachable` trap
-
-**Fix**: `hasReentryGuard()` scans the first 8 IR instructions for branches to
-`unreachable`. If found, back-edge JIT is skipped (function stays on interpreter).
-Call-count JIT is unaffected.
-
-## Compatibility Test Results (Mac, after fix)
-13 real-world wasm binaries. 12 PASS, 1 DIFF, 0 CRASH.
-
-The 1 DIFF is c_math_compute (FP precision difference, expected):
-- zwasm: 21304744.877962
-- wasmtime: 21304744.878669
-
-All benchmark performance restored (no regressions from fix).
-
-## Phase D: E2E Test Expansion Results
-
-Added 53 proposal-specific E2E tests from wasmtime misc_testsuite:
-- Function references: 5 files (call_indirect, table_fill/get/grow/set)
-- Tail call: 1 file (loop-across-modules)
-- Multi-memory: 1 file
-- Threads: 12 files
-- Memory64: 8 files (excl. more-than-4gb)
-- GC: 25 files
-
-Total: 778 assertions, 724 PASS (93.1%), 54 FAIL.
-
-### Bugs found and fixed
-1. **table_grow/size/fill used store.getTable(raw_idx) instead of instance.getTable(idx)**
-   — wrong table accessed in multi-module scenarios. Fixed in both bytecode and RegIR paths.
-2. **E2E runner: named modules not auto-registered** — modules with `$name` weren't
-   importable by other modules. Fixed: `registerExports()` called for named modules.
-3. **E2E runner: GC ref types not handled** — anyref, structref, arrayref, i31ref etc.
-   not recognized in valuesMatch(). Fixed.
-
-### Remaining 54 failures (known limitations)
-- 30 assert_invalid: typed funcref validation (zwasm accepts invalid stack types)
-- 7 assert_unlinkable (linking-errors): import type checking not implemented
-- 6 memory64_bounds: zero-length ops at out-of-bounds addresses should trap
-- 3 memory64_multi-memory: same bounds edge case
-- 2 gc_ref-test: ref.test with certain type combinations returns wrong result
-- 2 gc_array-alloc-too-large: missing OOM trap for oversized arrays
-- 2 memory64_linking: linking type validation
-- 1 memory64_linking-errors: decode overflow
-- 1 threads_SB_atomic: concurrency ordering (single-threaded limitation)
-
-## Notes
-- Rust: system rustup with wasm32-wasip1 target (not in nix)
-- Go: nix provides Go 1.25.5 with wasip1/wasm support
-- wasi-sdk: v30, fetched as binary in flake.nix
-- Sensitive info (SSH IPs) must NOT be in committed files
+## Benchmark gaps (Phase K input)
+rw_c_math: 5.9x, rw_c_string: 4.1x, gc_tree: 3.2x, st_matrix: 2.8x, rw_c_matrix: 2.7x.
+Root cause: libm/libc inner functions stay on interpreter.

@@ -1,7 +1,7 @@
 # zwasm
 
 Standalone Zig WebAssembly runtime — library AND CLI tool.
-Zig 0.15.2. Memo: `.dev/memo.md`. Roadmap: `.dev/roadmap.md` + `private/roadmap-production.md`.
+Zig 0.15.2. Memo: `@./.dev/memo.md`. Roadmap: `@./.dev/roadmap.md` + `@./private/roadmap-production.md`.
 
 ## Language Policy
 
@@ -20,29 +20,24 @@ Zig 0.15.2. Memo: `.dev/memo.md`. Roadmap: `.dev/roadmap.md` + `private/roadmap-
 ## Critical Rules
 
 - **One task = one commit**. Never batch multiple tasks.
-- **Architectural decisions only** → `.dev/decisions.md` (D## entry, D100+ numbering).
+  (During experimental work: uncommitted experiments are fine to revert.
+  Only committed code follows this rule.)
+- **Architectural decisions only** → `@./.dev/decisions.md` (D## entry, D100+ numbering).
   Bug fixes and one-time migrations do NOT need D## entries.
-- **Update `.dev/checklist.md`** when deferred items are resolved or added.
+- **Update `@./.dev/checklist.md`** when deferred items are resolved or added.
 
 ## Branch Policy
 
 **main = stable release branch.** ClojureWasm depends on zwasm main via GitHub URL.
-Breaking main breaks CW for all users.
 
-- **All development on feature branches**: `git checkout -b <stage>/<task>` (e.g. `5/5.6-matrix-opt`)
-- **Commit freely to feature branches**: one task = one commit rule still applies
-- **Merge to main only after**:
-  1. `zig build test` passes (zwasm)
-  2. `python3 test/spec/run_spec.py --build --summary` passes (if interpreter/opcodes changed)
-  3. `bash bench/run_bench.sh --quick` shows no regression
-- **Tag + CW release**: Manual process, use `/release` skill (`.claude/skills/release/SKILL.md`).
-- **Orient step**: At session start, check if you're on main or a feature branch.
-  If on main with pending work, create a feature branch first.
+- **All development on feature branches**: `git checkout -b <stage>/<task>`
+- **Merge to main only after Merge Gate** (below)
+- **Tag + CW release**: Use `/release` skill.
+- **Orient step**: At session start, check branch. If on main with pending work, branch first.
 
 ## Autonomous Workflow
 
 **Default mode: Continuous autonomous execution.**
-After session resume, continue automatically from where you left off.
 
 ### Loop: Orient → Plan → Execute → Commit → Repeat
 
@@ -52,176 +47,73 @@ After session resume, continue automatically from where you left off.
 git log --oneline -3 && git status --short && git branch --show-current
 ```
 
-**Branch check**: If on `main` and about to start new work, create a feature branch first.
-See Branch Policy above.
+Read `@./.dev/memo.md` → `## Current Task`:
+- If on `strictly-check/reliability-*` branch → also read `@./.dev/reliability-handover.md`
+- **Has design details** → Execute
+- **Title only or empty** → Plan
 
-Read `.dev/memo.md` → look at `## Current Task`:
-- **Has design details** → skip Plan, go straight to Execute
-- **Title only or empty** → go to Plan
-
-Lazy load: roadmap.md, decisions.md, checklist.md, bench-strategy.md (only when needed).
-
-**2. Plan**
-
-1. Write task design in `## Current Task` (approach, key files)
-2. Check `roadmap.md` (+ `private/roadmap-production.md` for Stages 35+) and `.dev/checklist.md` for context
+**2. Plan** — Write design in `## Current Task`. Check roadmap + checklist for context.
 
 **3. Execute**
 
 - TDD cycle: Red → Green → Refactor
 - Run tests: `zig build test`
-- Spec tests: `python3 test/spec/run_spec.py --build --summary` (when changing interpreter or opcodes)
-- `jit.zig` modified → `.claude/rules/jit-check.md` auto-loads
-- `bench/`, `vm.zig`, `regalloc.zig` modified → `.claude/rules/bench-check.md` auto-loads
+- Spec tests: `python3 test/spec/run_spec.py --build --summary` (when changing interpreter/opcodes)
 - **Investigation**: Check reference impls when debugging, designing, OR optimizing:
-  - wasmtime: `~/Documents/OSS/wasmtime/` (JIT patterns, cranelift)
+  - wasmtime: `~/Documents/OSS/wasmtime/` (JIT patterns, cranelift codegen)
   - zware: `~/Documents/OSS/zware/` (Zig idioms, API patterns)
-- **Optimization profiling**: When a benchmark has a performance gap vs wasmtime,
-  read the corresponding cranelift codegen to understand what optimizations they apply.
-  Key paths in wasmtime: `cranelift/codegen/src/isa/aarch64/` (ARM64 lowering),
-  `cranelift/codegen/src/opts/` (optimization rules).
-  The goal is parity (1x), not just "close enough" — study what they emit.
+  - **Clone more if needed**: `~/Documents/OSS/` — other runtimes as reference
+  - **Web search**: Use WebFetch/WebSearch for specs, blog posts, papers
+- **Optimization**: Study cranelift codegen for the same operation. Goal is parity (1x).
 
-**4. Complete** (per task)
-
-1. Run **Commit Gate Checklist** (below) — memo.md update is part of the gate:
-   - Mark task `[x]` in Task Queue
-   - `## Previous Task` ← one-line completed summary
-   - `## Current Task` ← next task title only (no design yet — Orient decides)
-   - Update `## Current State` only if metrics changed (LOC, test count, etc.)
-2. Single git commit (code + memo in same commit)
-3. **Immediately loop back to Orient** — do NOT stop, do NOT summarize,
-   do NOT ask for confirmation. The next task starts now.
+**4. Complete** — Run Commit Gate → update memo.md → commit → loop back immediately.
 
 ### No-Workaround Rule
 
-1. **Fix root causes, never work around.** If a feature is missing and needed,
-   implement it first (as a separate commit), then build on top.
-2. **Spec fidelity over expedience.** Never simplify API shape to avoid gaps.
+1. **Fix root causes, never work around.** Missing feature? Implement it first.
+2. **Spec fidelity over expedience.** Never simplify API to avoid gaps.
 3. **Checklist new blockers.** Add W## entry for missing features discovered mid-task.
 
 ### When to Stop
 
-See `.dev/memo.md` for task queue and current state.
-See `.dev/roadmap.md` for stage overview. See `private/roadmap-production.md` for Stages 35+ detail.
-Do NOT stop between tasks within a stage.
-
-Stop **only** when:
-
-- User explicitly requests stop
-- Ambiguous requirements with multiple valid directions (rare)
-- **Current stage's Task Queue is empty AND next stage requires user input**
-- **Reliability work**: all phases in `.dev/reliability-handover.md` are `[x]`
-
-Do NOT stop for:
-
-- Task Queue becoming empty (plan next task and continue)
-- Session context getting large (compress and continue)
-- "Good stopping points" — there are none until the current stage is done
-- **Merging to main** — merge is a checkpoint, not a stopping point.
-  After merge + push + new branch, immediately continue the next task.
-- **Branch boundaries** — creating a new `-NNN` branch is part of the flow, not a pause.
-- **User not responding** — the user may not be monitoring. Proceed autonomously.
-  If truly blocked (e.g., SSH unreachable, ambiguous architectural choice), document
-  the blocker in `.dev/reliability-handover.md` and move to the next unblocked task.
-
-When in doubt, **continue** — pick the most reasonable option and proceed.
+Stop **only** when: user requests, ambiguous requirements, or current stage done.
+- **Reliability work**: done when all phases in `@./.dev/reliability-handover.md` are `[x]`.
+Do NOT stop for: merges, branch boundaries, empty queue, large context, user not responding.
+When in doubt, **continue**.
 
 ### Commit Gate Checklist
 
-Run before every commit:
+0. **TDD**: Test written/updated BEFORE production code (skip for doc-only)
+1. **Tests**: `zig build test` passes
+2. **Spec tests**: Required when modifying vm.zig, predecode.zig, regalloc.zig, opcode.zig, module.zig, wasi.zig
+3. **Benchmarks**: Required for optimization/JIT tasks. `bash bench/run_bench.sh --quick`
+4. **Size guard**: Binary ≤ 1.5MB, memory ≤ 4.5MB
+5. **decisions.md / checklist.md / spec-support.md / memo.md**: Update as needed
 
-0. **TDD**: Test written/updated BEFORE production code in this commit (skip for doc-only/CI/config commits)
-1. **Tests**: `zig build test` passes (skip for doc-only commits that don't touch src/)
-2. **Spec tests**: `python3 test/spec/run_spec.py --build --summary` — REQUIRED when modifying
-   vm.zig, predecode.zig, regalloc.zig, opcode.zig, module.zig, wasi.zig
-   (`--build` auto-builds ReleaseSafe; use `--debug-build` for Debug investigation)
-3. **Benchmarks**: REQUIRED for optimization/JIT tasks.
-   Quick check: `bash bench/run_bench.sh --quick`
-   Record: `bash bench/record.sh --id=TASK_ID --reason=REASON`
-4. **Size guard**: Binary ≤ 1.5MB, memory ≤ 4.5MB (fib benchmark RSS).
-   Binary: `zig build -Doptimize=ReleaseSafe && ls -l zig-out/bin/zwasm`
-   Memory: fib mem_mb from `bash bench/compare_runtimes.sh --bench=fib --rt=zwasm --quick`
-   Fail if either exceeds limit. Current baseline: 1.28MB / 3.57MB.
-5. **decisions.md**: D## entry for architectural decisions (D100+)
-6. **checklist.md**: Resolve/add W## items
-7. **spec-support.md**: Update when implementing opcodes or WASI syscalls
-8. **memo.md**: Update per Complete step 1 format above
+### Merge Gate Checklist
 
-### Merge Gate Checklist (feature branch → main)
-
-Run before merging to main (in addition to commit gate):
-
-**Local (Mac):**
-1. `zig build test` passes
-2. `python3 test/spec/run_spec.py --build --summary` passes (if opcodes/interpreter changed)
-3. `bash bench/run_bench.sh --quick` — no performance regression
-
-**Ubuntu x86_64 (SSH):** (see `.dev/ubuntu-x86_64.md` for connection)
-4. Push branch, pull on Ubuntu
-5. `zig build test` passes
-6. `python3 test/spec/run_spec.py --build --summary` — spec tests pass
-7. `bash bench/run_bench.sh --quick` — no extreme regression
-
-If Ubuntu tests reveal failures not seen on Mac, **fix the root cause** before merging.
-Do not merge with known new regressions on either platform.
-
-Tag creation and CW release are manual — use `/release` when instructed.
-
-### Reliability Work Branch Strategy
-
-Active plan: `.dev/reliability-plan.md`. Progress: `.dev/reliability-handover.md`.
-
-**Incremental merge to main** — users are actively depending on main.
-Merge at each regression-free improvement boundary, not at stage end.
-
-- Branches: `strictly-check/reliability-001`, `-002`, `-003`, ...
-- Each branch targets a **regression-free improvement unit** (e.g., one bug fix, one test suite)
-- Workflow per branch (continuous — do NOT pause between steps):
-  1. Work on `strictly-check/reliability-NNN`
-  2. When improvement is complete and passes Merge Gate:
-     - Merge to main: `git checkout main && git merge strictly-check/reliability-NNN`
-     - Push: `git push origin main`
-  3. Create next branch: `git checkout -b strictly-check/reliability-NNN+1 main`
-  4. Update `.dev/reliability-handover.md` with new branch name
-  5. **Immediately** continue next task from handover — do NOT stop or summarize
-
-### Stage Completion
-
-When Task Queue for current stage is all `[x]`:
-
-1. Run benchmark recording: `bash bench/record.sh --id=STAGE_ID --reason="Stage N complete"`
-2. Merge to main via Merge Gate Checklist (tag if milestone warrants)
-3. Set `## Current Task` to first task of the next stage.
-4. If next stage needs task breakdown, plan tasks first, update memo.md, commit plan.
-5. Continue to first task — do NOT stop between stages.
+**Local (Mac):** tests + spec + benchmarks pass.
+**Ubuntu x86_64** (see `@./.dev/ubuntu-x86_64.md`): tests + spec + benchmarks pass.
+Fix root cause before merging if Ubuntu reveals new failures.
 
 ## Build & Test
 
 ```bash
-zig build              # Build (Debug)
-zig build test         # Run all tests
-zig build test -- "X"  # Specific test only
-./zig-out/bin/zwasm run file.wasm          # Run wasm module
-./zig-out/bin/zwasm run file.wasm -- args  # With arguments
+zig build test                     # Run all tests
+zig build test -- "X"              # Specific test only
+./zig-out/bin/zwasm run file.wasm  # Run wasm module
 ```
 
 ## Context Efficiency
 
-Minimize context consumption to extend session life:
-
-- **Read with offset/limit**: Never read an entire large file. Use `offset` and `limit`
-  to read only the function or section you need.
+- **Read with offset/limit**: Never read an entire large file.
 - **LSP first, Read second**: Use `xref-find-references`, `imenu-list-symbols`, or
   `xref-find-apropos` to locate the exact line range, then Read that range only.
-- **Grep for discovery**: Use the Grep tool to find relevant lines before reading files.
-  A Grep result with context (`-C`) is far cheaper than reading a whole file.
+- **Grep for discovery**: Grep with context (`-C`) is far cheaper than reading a whole file.
 
-## Benchmarks
+## References
 
-Benchmark discipline: `.claude/rules/bench-check.md` (auto-loads on bench/jit/vm edits).
-**YAML-first**: Before running benchmarks, check `bench/history.yaml` and
-`bench/runtime_comparison.yaml` for existing data. Fresh runs are only needed
-after code changes — commit gate handles recording automatically.
-Zig tips: `.claude/references/zig-tips.md` — check before writing Zig code.
-Reference index: `.dev/memo.md` § References
+Zig tips: `@./.claude/references/zig-tips.md` — check before writing Zig code.
+Benchmarks: `@./.claude/rules/bench-check.md` (auto-loads on bench/jit/vm edits).
+JIT: `@./.claude/rules/jit-check.md` (auto-loads on jit.zig edits).
+Reliability: `@./.claude/rules/reliability-work.md` (auto-loads on src/test/bench edits).

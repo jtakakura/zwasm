@@ -1,7 +1,7 @@
 #!/bin/bash
 # zwasm benchmark runner — uses hyperfine for reliable measurements.
 # Usage:
-#   bash bench/run_bench.sh              # Run all benchmarks (3 runs + 1 warmup)
+#   bash bench/run_bench.sh              # Run all benchmarks (5 runs + 3 warmup)
 #   bash bench/run_bench.sh --quick      # Single run, no warmup
 #   bash bench/run_bench.sh --bench=fib  # Run specific benchmark
 #   bash bench/run_bench.sh --profile    # Show execution profiles
@@ -97,7 +97,7 @@ for entry in "${BENCHMARKS[@]}"; do
   if [[ $QUICK -eq 1 ]]; then
     hyperfine --runs 1 --warmup 0 "$cmd"
   else
-    hyperfine --runs 3 --warmup 1 "$cmd"
+    hyperfine --runs 5 --warmup 3 "$cmd"
   fi
   echo
 done
