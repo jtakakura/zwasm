@@ -1926,43 +1926,58 @@ pub const Vm = struct {
             .memory_copy => {
                 const dst_memidx: u16 = @intCast(try reader.readU32());
                 const src_memidx: u16 = @intCast(try reader.readU32());
-                const n = @as(u32, @bitCast(self.popI32()));
-                const src = @as(u32, @bitCast(self.popI32()));
-                const dst = @as(u32, @bitCast(self.popI32()));
                 const dst_mem = try instance.getMemory(dst_memidx);
+                const src_mem_obj = if (dst_memidx == src_memidx) dst_mem else try instance.getMemory(src_memidx);
+                // memory64: pop as u64 when either memory has i64 index type
+                const n64: u64 = if (dst_mem.is_64 or src_mem_obj.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                const src64: u64 = if (src_mem_obj.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                const dst64: u64 = if (dst_mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 if (dst_memidx == src_memidx) {
+                    if (src64 +| n64 > dst_mem.memory().len or dst64 +| n64 > dst_mem.memory().len)
+                        return error.OutOfBoundsMemoryAccess;
+                    const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
+                    const src: u32 = std.math.cast(u32, src64) orelse return error.OutOfBoundsMemoryAccess;
+                    const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
                     try dst_mem.copyWithin(dst, src, n);
                 } else {
-                    const src_mem = try instance.getMemory(src_memidx);
-                    const src_data = src_mem.memory();
+                    const src_data = src_mem_obj.memory();
                     const dst_data = dst_mem.memory();
-                    if (@as(u64, src) + n > src_data.len or @as(u64, dst) + n > dst_data.len)
+                    if (src64 +| n64 > src_data.len or dst64 +| n64 > dst_data.len)
                         return error.OutOfBoundsMemoryAccess;
+                    const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
+                    const src: u32 = std.math.cast(u32, src64) orelse return error.OutOfBoundsMemoryAccess;
+                    const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
                     if (n > 0) @memcpy(dst_data[dst..][0..n], src_data[src..][0..n]);
                 }
             },
             .memory_fill => {
                 const memidx: u16 = @intCast(try reader.readU32());
-                const n = @as(u32, @bitCast(self.popI32()));
+                const fill_mem = try instance.getMemory(memidx);
+                // memory64: dst and n are i64
+                const n64: u64 = if (fill_mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = @as(u8, @truncate(@as(u32, @bitCast(self.popI32()))));
-                const dst = @as(u32, @bitCast(self.popI32()));
-                const m = try instance.getMemory(memidx);
-                try m.fill(dst, n, val);
+                const dst64: u64 = if (fill_mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                if (dst64 +| n64 > fill_mem.memory().len)
+                    return error.OutOfBoundsMemoryAccess;
+                const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
+                const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
+                try fill_mem.fill(dst, n, val);
             },
             .memory_init => {
                 const data_idx = try reader.readU32();
                 const memidx: u16 = @intCast(try reader.readU32());
+                const init_mem = try instance.getMemory(memidx);
                 const n = @as(u32, @bitCast(self.popI32()));
                 const src = @as(u32, @bitCast(self.popI32()));
-                const dst = @as(u32, @bitCast(self.popI32()));
-                const m = try instance.getMemory(memidx);
+                // memory64: dst is i64
+                const dst64: u64 = if (init_mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 if (data_idx >= instance.dataaddrs.items.len) return error.Trap;
                 const d = try instance.store.getData(instance.dataaddrs.items[data_idx]);
-                // Dropped segments have effective length 0 (spec: n=0 succeeds even if dropped)
                 const data_len: u64 = if (d.dropped) 0 else d.data.len;
-                if (@as(u64, src) + n > data_len or @as(u64, dst) + n > m.memory().len)
+                if (@as(u64, src) + n > data_len or dst64 +| n > init_mem.memory().len)
                     return error.OutOfBoundsMemoryAccess;
-                if (n > 0) @memcpy(m.memory()[dst..][0..n], d.data[src..][0..n]);
+                const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
+                if (n > 0) @memcpy(init_mem.memory()[dst..][0..n], d.data[src..][0..n]);
             },
             .data_drop => {
                 const data_idx = try reader.readU32();
@@ -4147,17 +4162,26 @@ pub const Vm = struct {
 
                 // ---- Bulk memory operations ----
                 regalloc_mod.OP_MEMORY_FILL => {
-                    const dst = @as(u32, @truncate(regs[instr.rd]));
-                    const val = @as(u8, @truncate(regs[instr.rs1]));
-                    const n = @as(u32, @truncate(regs[instr.rs2()]));
                     const m = try instance.getMemory(0);
+                    const dst64: u64 = regs[instr.rd];
+                    const val = @as(u8, @truncate(regs[instr.rs1]));
+                    const n64: u64 = regs[instr.rs2()];
+                    if (dst64 +| n64 > m.memory().len)
+                        return error.OutOfBoundsMemoryAccess;
+                    const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
+                    const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
                     try m.fill(dst, n, val);
                 },
                 regalloc_mod.OP_MEMORY_COPY => {
-                    const dst = @as(u32, @truncate(regs[instr.rd]));
-                    const src = @as(u32, @truncate(regs[instr.rs1]));
-                    const n = @as(u32, @truncate(regs[instr.rs2()]));
                     const m = try instance.getMemory(0);
+                    const dst64: u64 = regs[instr.rd];
+                    const src64: u64 = regs[instr.rs1];
+                    const n64: u64 = regs[instr.rs2()];
+                    if (src64 +| n64 > m.memory().len or dst64 +| n64 > m.memory().len)
+                        return error.OutOfBoundsMemoryAccess;
+                    const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
+                    const src: u32 = std.math.cast(u32, src64) orelse return error.OutOfBoundsMemoryAccess;
+                    const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
                     try m.copyWithin(dst, src, n);
                 },
 
@@ -5136,39 +5160,52 @@ pub const Vm = struct {
             0x06 => { const a = self.popF64(); try self.pushI64(truncSatClamp(i64, f64, a)); },
             0x07 => { const a = self.popF64(); try self.pushI64(@bitCast(truncSatClamp(u64, f64, a))); },
             0x0A => { // memory.copy (extra=dst_memidx, operand=src_memidx)
-                const n = @as(u32, @bitCast(self.popI32()));
-                const src = @as(u32, @bitCast(self.popI32()));
-                const dst = @as(u32, @bitCast(self.popI32()));
                 const dst_mem = try instance.getMemory(instr.extra);
+                const src_mem_obj = if (instr.extra == instr.operand) dst_mem else try instance.getMemory(@intCast(instr.operand));
+                const n64: u64 = if (dst_mem.is_64 or src_mem_obj.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                const src64: u64 = if (src_mem_obj.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                const dst64: u64 = if (dst_mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 if (instr.extra == instr.operand) {
+                    if (src64 +| n64 > dst_mem.memory().len or dst64 +| n64 > dst_mem.memory().len)
+                        return error.OutOfBoundsMemoryAccess;
+                    const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
+                    const src: u32 = std.math.cast(u32, src64) orelse return error.OutOfBoundsMemoryAccess;
+                    const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
                     try dst_mem.copyWithin(dst, src, n);
                 } else {
-                    const src_mem = try instance.getMemory(@intCast(instr.operand));
-                    const src_data = src_mem.memory();
+                    const src_data = src_mem_obj.memory();
                     const dst_data = dst_mem.memory();
-                    if (@as(u64, src) + n > src_data.len or @as(u64, dst) + n > dst_data.len)
+                    if (src64 +| n64 > src_data.len or dst64 +| n64 > dst_data.len)
                         return error.OutOfBoundsMemoryAccess;
+                    const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
+                    const src: u32 = std.math.cast(u32, src64) orelse return error.OutOfBoundsMemoryAccess;
+                    const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
                     if (n > 0) @memcpy(dst_data[dst..][0..n], src_data[src..][0..n]);
                 }
             },
             0x0B => { // memory.fill (operand=memidx)
-                const n = @as(u32, @bitCast(self.popI32()));
+                const fill_m = try instance.getMemory(@intCast(instr.operand));
+                const n64: u64 = if (fill_m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 const val = @as(u8, @truncate(@as(u32, @bitCast(self.popI32()))));
-                const dst = @as(u32, @bitCast(self.popI32()));
-                const m = try instance.getMemory(@intCast(instr.operand));
-                try m.fill(dst, n, val);
+                const dst64: u64 = if (fill_m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
+                if (dst64 +| n64 > fill_m.memory().len)
+                    return error.OutOfBoundsMemoryAccess;
+                const n: u32 = std.math.cast(u32, n64) orelse return error.OutOfBoundsMemoryAccess;
+                const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
+                try fill_m.fill(dst, n, val);
             },
             0x08 => { // memory.init (extra=memidx, operand=data_idx)
+                const init_m = try instance.getMemory(instr.extra);
                 const n = @as(u32, @bitCast(self.popI32()));
                 const src = @as(u32, @bitCast(self.popI32()));
-                const dst = @as(u32, @bitCast(self.popI32()));
-                const m = try instance.getMemory(instr.extra);
+                const dst64: u64 = if (init_m.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
                 if (instr.operand >= instance.dataaddrs.items.len) return error.Trap;
                 const d = try instance.store.getData(instance.dataaddrs.items[instr.operand]);
                 const data_len: u64 = if (d.dropped) 0 else d.data.len;
-                if (@as(u64, src) + n > data_len or @as(u64, dst) + n > m.memory().len)
+                if (@as(u64, src) + n > data_len or dst64 +| n > init_m.memory().len)
                     return error.OutOfBoundsMemoryAccess;
-                if (n > 0) @memcpy(m.memory()[dst..][0..n], d.data[src..][0..n]);
+                const dst: u32 = std.math.cast(u32, dst64) orelse return error.OutOfBoundsMemoryAccess;
+                if (n > 0) @memcpy(init_m.memory()[dst..][0..n], d.data[src..][0..n]);
             },
             0x09 => { // data.drop
                 if (instr.operand >= instance.dataaddrs.items.len) return error.Trap;

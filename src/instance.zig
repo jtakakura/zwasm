@@ -258,6 +258,9 @@ pub const Instance = struct {
                     if (imp.memory_type) |expected| {
                         const wasm_mem = self.store.getMemory(handle) catch
                             return error.ImportNotFound;
+                        // Spec: memory64 flag must match
+                        if (wasm_mem.is_64 != expected.limits.is_64)
+                            return error.ImportTypeMismatch;
                         // Spec: check current size (not declared min) against required min
                         if (wasm_mem.size() < expected.limits.min)
                             return error.ImportTypeMismatch;
@@ -332,7 +335,7 @@ pub const Instance = struct {
 
     fn instantiateMemories(self: *Instance) !void {
         for (self.module.memories.items) |mem_def| {
-            const addr = try self.store.addMemory(mem_def.limits.min, mem_def.limits.max, mem_def.limits.page_size, mem_def.limits.is_shared);
+            const addr = try self.store.addMemory(mem_def.limits.min, mem_def.limits.max, mem_def.limits.page_size, mem_def.limits.is_shared, mem_def.limits.is_64);
             const m = try self.store.getMemory(addr);
             try m.allocateInitial();
             try self.memaddrs.append(self.alloc, addr);

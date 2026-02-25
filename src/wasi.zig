@@ -1981,6 +1981,7 @@ pub fn registerAll(store: *Store, module: *const Module) !void {
                     mt.limits.max,
                     mt.limits.page_size,
                     mt.limits.is_shared,
+                    mt.limits.is_64,
                 );
                 const m = try store.getMemory(addr);
                 try m.allocateInitial();

@@ -3724,7 +3724,7 @@ test "x86_64 compile and execute memory load" {
     // Set up a Store with one memory page (64KB)
     var store = store_mod.Store.init(alloc);
     defer store.deinit();
-    const mem_idx = try store.addMemory(1, null, 65536, false);
+    const mem_idx = try store.addMemory(1, null, 65536, false, false);
     const mem = try store.getMemory(mem_idx);
     try mem.allocateInitial();
 
@@ -3796,7 +3796,7 @@ test "x86_64 compile and execute memory store then load" {
 
     var store = store_mod.Store.init(alloc);
     defer store.deinit();
-    const mem_idx = try store.addMemory(1, null, 65536, false);
+    const mem_idx = try store.addMemory(1, null, 65536, false, false);
     const mem = try store.getMemory(mem_idx);
     try mem.allocateInitial();
 

@@ -341,7 +341,7 @@ pub const Store = struct {
         return self.functions.items.len - 1;
     }
 
-    pub fn addMemory(self: *Store, min: u64, max: ?u64, page_size: u32, is_shared_memory: bool) !usize {
+    pub fn addMemory(self: *Store, min: u64, max: ?u64, page_size: u32, is_shared_memory: bool, is_64: bool) !usize {
         const min32: u32 = std.math.cast(u32, min) orelse return error.MemoryLimitExceeded;
         const max32: ?u32 = if (max) |m| std.math.cast(u32, m) orelse return error.MemoryLimitExceeded else null;
         const ptr = try self.memories.addOne(self.alloc);
@@ -353,6 +353,7 @@ pub const Store = struct {
         else
             WasmMemory.initWithPageSize(self.alloc, min32, max32, page_size);
         new_mem.is_shared_memory = is_shared_memory;
+        new_mem.is_64 = is_64;
         ptr.* = new_mem;
         return self.memories.items.len - 1;
     }
@@ -489,7 +490,7 @@ test "Store — addMemory and getMemory" {
     var store = Store.init(testing.allocator);
     defer store.deinit();
 
-    const addr = try store.addMemory(1, 10, 65536, false);
+    const addr = try store.addMemory(1, 10, 65536, false, false);
     const m = try store.getMemory(addr);
     try testing.expectEqual(@as(u32, 1), m.min);
     try testing.expectEqual(@as(u32, 10), m.max.?);

@@ -41,6 +41,7 @@ pub const Memory = struct {
     data: std.ArrayList(u8),
     shared: bool = false, // true = borrowed from another module, skip deinit
     is_shared_memory: bool = false, // threads proposal: declared with shared flag
+    is_64: bool = false, // memory64 proposal: i64 addressing
     guard_mem: ?guard_mod.GuardedMem = null, // mmap-backed with guard pages
     wait_queue: ?WaitQueue = null, // threads: wait/notify support
 
