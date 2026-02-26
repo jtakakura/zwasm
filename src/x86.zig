@@ -1641,6 +1641,17 @@ pub const Compiler = struct {
             self.emitLoadMemCache();
         }
 
+        // Load ALL physically-mapped vregs from register file.
+        // Unlike normal prologue (which uses prologue_load_mask), OSR must load all
+        // because we're entering mid-function with interpreter's register state.
+        const max: u8 = @intCast(@min(self.reg_count, MAX_PHYS_REGS));
+        for (0..max) |i| {
+            const vreg: u16 = @intCast(i);
+            if (vregToPhys(vreg)) |phys| {
+                Enc.loadDisp32(&self.code, self.alloc, phys, REGS_PTR, @as(i32, vreg) * 8);
+            }
+        }
+
         // Jump to the loop body at pc_map[target_pc]
         const target_offset = self.pc_map.items[target_pc];
         const jmp_patch_off = Enc.jmpRel32(&self.code, self.alloc);
@@ -3205,13 +3216,19 @@ pub const Compiler = struct {
                 // Compare condition first (before clobbering scratch regs)
                 const cond_reg = self.getOrLoad(cond_idx, SCRATCH);
                 Enc.testRegReg(&self.code, self.alloc, cond_reg, cond_reg);
-                // Load val1 into destination
                 const d = vregToPhys(instr.rd) orelse SCRATCH;
+                // Load val2 BEFORE val1 — loading val1 into d would clobber val2
+                // when rd == val2_idx (both map to the same physical register).
+                var val2_reg = self.getOrLoad(val2_idx, SCRATCH2);
+                if (val2_reg == d) {
+                    // val2 is in d, which will be overwritten by val1 — save it
+                    Enc.movRegReg(&self.code, self.alloc, SCRATCH2, val2_reg);
+                    val2_reg = SCRATCH2;
+                }
+                // Load val1 into destination
                 const val1 = self.getOrLoad(instr.rs1, d);
                 if (val1 != d) Enc.movRegReg(&self.code, self.alloc, d, val1);
-                // Load val2 into SCRATCH2
-                const val2_reg = self.getOrLoad(val2_idx, SCRATCH2);
-                // CMOVNE: if cond == 0, overwrite d with val2 → CMOVE d, val2
+                // CMOVE: if cond == 0, overwrite d with val2
                 Enc.cmovcc64(&self.code, self.alloc, .e, d, val2_reg);
                 if (vregToPhys(instr.rd) == null) self.storeVreg(instr.rd, d);
             },

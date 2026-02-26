@@ -2244,3 +2244,38 @@ entries:
       rw_c_string: {time_ms: 22.2}
       rw_cpp_string: {time_ms: 6.8}
       rw_cpp_sort: {time_ms: 3.9}
+  - id: "R6-osr"
+    date: "2026-02-27"
+    reason: "R6: OSR for back-edge JIT — st_sieve 0.97x restored"
+    commit: "6905eb7"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 49.5}
+      tak: {time_ms: 7.3}
+      sieve: {time_ms: 4.7}
+      nbody: {time_ms: 22.1}
+      nqueens: {time_ms: 2.8}
+      tgo_fib: {time_ms: 34.0}
+      tgo_tak: {time_ms: 7.2}
+      tgo_arith: {time_ms: 2.5}
+      tgo_sieve: {time_ms: 3.5}
+      tgo_fib_loop: {time_ms: 2.5}
+      tgo_gcd: {time_ms: 2.5}
+      tgo_nqueens: {time_ms: 39.4}
+      tgo_mfr: {time_ms: 44.1}
+      tgo_list: {time_ms: 35.8}
+      tgo_rwork: {time_ms: 6.4}
+      tgo_strops: {time_ms: 31.0}
+      st_fib2: {time_ms: 905.4}
+      st_sieve: {time_ms: 193.3}
+      st_nestedloop: {time_ms: 2.7}
+      st_ackermann: {time_ms: 4.7}
+      st_matrix: {time_ms: 286.8}
+      gc_alloc: {time_ms: 5.1}
+      gc_tree: {time_ms: 21.7}
+      rw_rust_fib: {time_ms: 35.1}
+      rw_c_matrix: {time_ms: 18.5}
+      rw_c_math: {time_ms: 58.5}
+      rw_c_string: {time_ms: 43.7}
+      rw_cpp_string: {time_ms: 9.1}
+      rw_cpp_sort: {time_ms: 5.6}

@@ -95,6 +95,57 @@ jobs:
           fi
           echo "PASS: Within 1.5 MB limit"
 
+      - name: Memory usage check
+        run: |
+          BINARY=zig-out/bin/zwasm
+          LIMIT_KB=4608  # 4.5 MB
+          if [ "$(uname)" = "Darwin" ]; then
+            MEM_OUTPUT=$(/usr/bin/time -l "$BINARY" --invoke sieve bench/wasm/sieve.wasm 1000000 2>&1 >/dev/null)
+            MEM_BYTES=$(echo "$MEM_OUTPUT" | grep "maximum resident set size" | awk '{print $1}')
+            MEM_KB=$((MEM_BYTES / 1024))
+          else
+            MEM_OUTPUT=$(/usr/bin/time -v "$BINARY" --invoke sieve bench/wasm/sieve.wasm 1000000 2>&1 >/dev/null)
+            MEM_KB=$(echo "$MEM_OUTPUT" | grep "Maximum resident set size" | awk '{print $NF}')
+          fi
+          MEM_MB=$(python3 -c "print(f'{int(${MEM_KB}) / 1024:.2f}')")
+          echo "Peak memory: ${MEM_MB} MB (${MEM_KB} KB)"
+          if [ "$MEM_KB" -gt "$LIMIT_KB" ]; then
+            echo "FAIL: Peak memory exceeds 4.5 MB limit"
+            exit 1
+          fi
+          echo "PASS: Within 4.5 MB limit"
+
+      - name: Install wasmtime
+        run: curl https://wasmtime.dev/install.sh -sSf | bash
+
+      - name: Install WASI SDK
+        env:
+          WASI_SDK_VERSION: "25"
+        run: |
+          if [ "$(uname)" = "Darwin" ]; then
+            ARCH="arm64"; OS="macos"
+          else
+            ARCH="x86_64"; OS="linux"
+          fi
+          ARCHIVE="wasi-sdk-${WASI_SDK_VERSION}.0-${ARCH}-${OS}.tar.gz"
+          curl -L -o /tmp/wasi-sdk.tar.gz \
+            "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/${ARCHIVE}"
+          mkdir -p /opt/wasi-sdk
+          tar xzf /tmp/wasi-sdk.tar.gz -C /opt/wasi-sdk --strip-components=1
+
+      - name: Setup Rust wasm32-wasip1 target
+        run: rustup target add wasm32-wasip1
+
+      - name: Build real-world wasm programs
+        env:
+          WASI_SDK_PATH: /opt/wasi-sdk
+        run: bash test/realworld/build_all.sh
+
+      - name: Run real-world compat tests
+        run: |
+          export PATH="$HOME/.wasmtime/bin:$PATH"
+          bash test/realworld/run_compat.sh
+
   benchmark:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

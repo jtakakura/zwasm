@@ -12,29 +12,28 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-Reliability improvement (branch: `strictly-check/reliability-004`).
-P1+P2 merged to main. Now on P3-P5.
+Reliability improvement (branch: `strictly-check/reliability-005`).
 Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`.
 
-**Plan A: Incremental regression fix + feature implementation**
-- [x] P1: rw_c_string hang fix — skip back-edge JIT for reentry guard (20.2ms)
-- [x] P2: nbody FP cache fix — expand D-reg cache D2-D15, FP-aware MOV (23.1ms, 0.97x wasmtime)
-- [x] P3: rw_c_math — accepted as regalloc limit (58ms, 4.92x, 136 regs)
-- [x] P4: GC JIT — predecode+regalloc+JIT for struct ops (gc_alloc 0.50x, gc_tree 0.73x wasmtime)
-- [x] P5: st_matrix — accepted as regalloc limit exception (296ms, 3.23x, 35 vregs)
-
-**All P1-P5 phases complete.** Ready for merge gate (Mac local + Ubuntu x86_64).
+**reliability-005: Real-world DIFF fix + test expansion + Phase H**
+- [x] R0: CI + gate update (E2E/compat in gates, memory check, WASI SDK in CI)
+- [x] R1: E2E segfault fix — JIT self-call stack overflow use-after-free (d289d44)
+- [x] R2: Go WASI fix — back-edge JIT restart side-effect detection (806cb7d)
+- [x] R3: cpp_string_ops Ubuntu fix — same root cause as R2
+- [x] R4: c_hello_wasi Ubuntu fix — same root cause as R2
+- [x] R5: 18 new real-world tests + JIT IR limit + x86 select fix (30/30 Mac+Ubuntu)
+- [ ] R6: Phase H Gate pass (all 9 conditions)
+- [ ] R7: Merge to main, push, CI green
+- [ ] R8: Phase H — 41-file documentation audit
 
 ## Previous Task
 
-P4: GC JIT — predecode→regalloc→JIT pipeline for struct.new/get/set/new_default,
-ref.null/is_null. BLR trampoline to unified jitGcTrampoline. Fix: emitPrologue must load
-cached vm/inst ptrs BEFORE emitLoadRegPtrAddr. gc_alloc 19.2→5.4ms, gc_tree 138→22.8ms.
+reliability-004 (P1-P5): rw_c_string hang fix, nbody FP cache, rw_c_math/st_matrix
+regalloc limits, GC JIT. All merged to main at f654cc9.
 
 ## Known Bugs
 
-- c_hello_wasi: EXIT=71 on Ubuntu (WASI issue, not JIT — same with --profile)
-- Go WASI: 3 Go programs produce no output (WASI compatibility, not JIT-related)
+None — all previously known bugs fixed (R1: E2E segfault, R2-R4: back-edge JIT restart).
 
 ## References
 

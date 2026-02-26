@@ -68,6 +68,12 @@ pub const HOT_THRESHOLD: u32 = 10;
 /// Back-edge threshold — JIT after this many loop iterations in a single call.
 pub const BACK_EDGE_THRESHOLD: u32 = 1000;
 
+/// Maximum IR instruction count for JIT compilation.
+/// Functions exceeding this limit fall back to the register IR interpreter.
+/// Prevents single-pass regalloc from producing excessively spill-heavy code
+/// for very large library functions (e.g., vfprintf at 3000+ IR instrs).
+pub const MAX_JIT_IR_INSTRS: u32 = 1500;
+
 // ================================================================
 // ARM64 instruction encoding
 // ================================================================
@@ -1973,18 +1979,20 @@ pub const Compiler = struct {
     }
 
     /// Emit callee-saved register restore sequence.
-    /// For self-call functions: CBZ x29 skips the normal path (depth flush + 5 LDPs).
+    /// For self-call functions: CBZ x29 skips the normal path (depth flush + 5 LDPs),
+    /// landing directly on the final LDP x29,x30 + RET.
     /// When depth_reg_cached, flushes x28 to vm.call_depth before LDP restores x28.
     fn emitCalleeSavedRestore(self: *Compiler) void {
+        var cbz_idx: u32 = 0;
         if (self.has_self_call) {
-            // Self-call path skips depth flush + 5 LDPs.
-            const skip: i19 = if (self.depth_reg_cached) 8 else 6;
-            self.emit(a64.cbz64(29, skip));
+            cbz_idx = self.currentIdx();
+            self.emit(a64.cbz64(29, 0)); // placeholder — patched below
         }
         // Normal path only: flush depth counter before LDP clobbers x28.
+        // Use emitLoadRegPtrAddr (computes from vm_ptr/x20, not REGS_PTR/x19) to avoid
+        // crash when REGS_PTR is stale after self-call error propagation.
         if (self.depth_reg_cached) {
-            const rp_slot: u16 = @intCast(@as(u32, self.reg_count) * 8);
-            self.emit(a64.ldr64(SCRATCH, REGS_PTR, rp_slot)); // &vm.reg_ptr
+            self.emitLoadRegPtrAddr(SCRATCH); // SCRATCH = &vm.reg_ptr (from x20)
             self.emit(a64.str64(28, SCRATCH, 8)); // vm.call_depth = x28
         }
         // Restore callee-saved FP registers D8-D15 (only for non-self-call).
@@ -1999,6 +2007,12 @@ pub const Compiler = struct {
         self.emit(a64.ldpPost(23, 24, 31, 2));
         self.emit(a64.ldpPost(21, 22, 31, 2));
         self.emit(a64.ldpPost(19, 20, 31, 2));
+        // Patch CBZ to land on the final LDP x29,x30 (self-call path).
+        if (self.has_self_call) {
+            const target = self.currentIdx();
+            const skip: i19 = @intCast(@as(i32, @intCast(target)) - @as(i32, @intCast(cbz_idx)));
+            self.code.items[cbz_idx] = a64.cbz64(29, skip);
+        }
         self.emit(a64.ldpPost(29, 30, 31, 2));
     }
 
@@ -2022,6 +2036,15 @@ pub const Compiler = struct {
         self.emit(a64.stpPre(23, 24, 31, -2)); // stp x23, x24, [sp, #-16]!
         self.emit(a64.stpPre(25, 26, 31, -2)); // stp x25, x26, [sp, #-16]!
         self.emit(a64.stpPre(27, 28, 31, -2)); // stp x27, x28, [sp, #-16]!
+
+        // Must match normal prologue: save FP callee-saved D8-D15 for non-self-call.
+        // The shared epilogue pops these, so OSR must push them too.
+        if (!self.has_self_call) {
+            self.emit(a64.stpFpPre(8, 9, 31, -2));
+            self.emit(a64.stpFpPre(10, 11, 31, -2));
+            self.emit(a64.stpFpPre(12, 13, 31, -2));
+            self.emit(a64.stpFpPre(14, 15, 31, -2));
+        }
 
         // Self-call marker: x29 = SP (nonzero = normal entry, full epilogue)
         if (self.has_self_call) {

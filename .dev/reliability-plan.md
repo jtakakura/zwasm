@@ -106,6 +106,64 @@ Verification:
 
 ---
 
-## Phase H: Documentation Accuracy (LAST)
+## Phase H: Comprehensive Documentation Audit (LAST)
 
-Begins only after Phase H Gate passes. README claims audit, benchmark table update.
+Begins only after Phase H Gate passes.
+Audit **every external-facing document** — verify accuracy, delete stale content, add missing info, update numbers.
+
+### Procedure
+
+For each file: read → compare against actual codebase/test results → update/delete/add as needed → commit.
+
+### Checklist (41 files)
+
+#### Root (6 files)
+- [ ] `README.md` — benchmark table, feature matrix, supported proposals, install instructions
+- [ ] `CHANGELOG.md` — entries for all changes since last release
+- [ ] `LICENSE` — year, copyright holder
+- [ ] `SECURITY.md` — threat model accuracy, disclosure process
+- [ ] `CONTRIBUTING.md` — TDD rules, test commands, PR process match current workflow
+- [ ] `CODE_OF_CONDUCT.md` — links, contact info
+
+#### docs/ (5 files)
+- [ ] `docs/usage.md` — CLI flags, WASI capabilities, examples match current binary
+- [ ] `docs/security.md` — threat model, memory isolation guarantees
+- [ ] `docs/errors.md` — error codes match actual API
+- [ ] `docs/api-boundary.md` — stable API surface, SemVer guarantees
+- [ ] `docs/audit-36.md` — audit findings still relevant
+
+#### mdBook English — book/en/src/ (13 files)
+- [ ] `SUMMARY.md` — table of contents matches actual chapters
+- [ ] `introduction.md` — feature overview, quick start
+- [ ] `getting-started.md` — installation, setup, first run
+- [ ] `cli-reference.md` — all commands, flags, examples
+- [ ] `embedding-guide.md` — Zig library API, code samples compile
+- [ ] `faq.md` — answers still accurate
+- [ ] `architecture.md` — component diagram, module descriptions
+- [ ] `spec-coverage.md` — proposal support status, pass counts
+- [ ] `security-model.md` — security guarantees, trust boundaries
+- [ ] `performance.md` — benchmark numbers, methodology, comparison charts
+- [ ] `memory-model.md` — memory layout, limits
+- [ ] `comparison.md` — other runtimes comparison, numbers
+- [ ] `contributing.md` — workflow, commands
+
+#### mdBook Japanese — book/ja/src/ (13 files)
+- [ ] `SUMMARY.md`
+- [ ] `introduction.md`
+- [ ] `getting-started.md`
+- [ ] `cli-reference.md`
+- [ ] `embedding-guide.md`
+- [ ] `faq.md`
+- [ ] `architecture.md`
+- [ ] `spec-coverage.md`
+- [ ] `security-model.md`
+- [ ] `performance.md`
+- [ ] `memory-model.md`
+- [ ] `comparison.md`
+- [ ] `contributing.md`
+
+#### GitHub .github/ (4 files)
+- [ ] `FUNDING.yml` — sponsor links
+- [ ] `ISSUE_TEMPLATE/bug_report.yml` — fields, labels
+- [ ] `ISSUE_TEMPLATE/feature_request.yml` — fields, labels
+- [ ] `workflows/book.yml` — mdBook build still works
