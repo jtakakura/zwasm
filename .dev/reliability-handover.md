@@ -22,8 +22,8 @@
 - [x] **R0**: CI + gate update — add E2E/compat to gates, memory check, WASI SDK/wasmtime in CI
 
 #### E2E + DIFF fixes
-- [ ] **R1**: E2E segfault fix — Mac aarch64 e2e_runner crashes (0xaaaaaaaaaaaaaab2 poison)
-- [ ] **R2**: Go WASI fix — 3 Go programs produce no output (go_hello_wasi, go_json_marshal, go_sort_benchmark)
+- [x] **R1**: E2E segfault fix — JIT self-call stack overflow use-after-free (d289d44)
+- [x] **R2**: Go WASI fix — back-edge JIT restart corrupts Go state machine (skip for side-effect functions)
 - [ ] **R3**: cpp_string_ops Ubuntu fix — 25000 vs 24995 (x86_64 only)
 - [ ] **R4**: c_hello_wasi Ubuntu fix — EXIT=71 (WASI issue)
 

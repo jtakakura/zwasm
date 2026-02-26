@@ -3560,6 +3560,16 @@ pub const Vm = struct {
                 if (trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "reentry guard — skip back-edge JIT");
                 return;
             }
+            // Functions with calls, call_indirect, or global.set cannot be safely
+            // restarted from pc=0 — their side effects (memory writes via callees,
+            // global state changes) would be re-executed, corrupting program state.
+            // Go WASM state-machine functions (e.g. moduledataverify1) are the
+            // primary case: 1000+ loop iterations modify Go's SP and heap.
+            if (hasNonRestartableSideEffects(reg.code)) {
+                wf.jit_failed = true;
+                if (trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "side effects — skip back-edge JIT");
+                return;
+            }
             wf.jit_code = jit_mod.compileFunction(alloc, reg, pool64, wf.func_idx, param_count, result_count, trace, min_memory_bytes, use_guard_pages, null);
             if (wf.jit_code != null) {
                 if (trace) |tc| trace_mod.traceJitBackEdge(tc, wf.func_idx, @intCast(reg.code.len), @intCast(wf.jit_code.?.buf.len));
@@ -3568,6 +3578,23 @@ pub const Vm = struct {
             wf.jit_failed = true;
             if (trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "back-edge compilation failed");
         }
+    }
+
+    /// Detect functions unsafe for back-edge JIT restart from pc=0.
+    /// Functions with calls, call_indirect, or global.set have observable side
+    /// effects that would be re-executed on restart, corrupting program state.
+    /// (Go WASM state-machine functions are the primary case.)
+    fn hasNonRestartableSideEffects(ir: []const regalloc_mod.RegInstr) bool {
+        for (ir) |instr| {
+            switch (instr.op) {
+                regalloc_mod.OP_CALL,
+                regalloc_mod.OP_CALL_INDIRECT,
+                0x24, // global.set
+                => return true,
+                else => {},
+            }
+        }
+        return false;
     }
 
     /// Detect C/C++ reentry guard: early branch to `unreachable` based on
@@ -7928,4 +7955,36 @@ test "Resource limits — fuel metering" {
     var results = [_]u64{0};
     // memory_size needs at least 1 instruction, should exhaust fuel
     try testing.expectError(error.FuelExhausted, vm.invoke(&inst, "memory_size", &.{}, &results));
+}
+
+test "Back-edge JIT — hasNonRestartableSideEffects" {
+    const R = regalloc_mod.RegInstr;
+
+    // Pure loop (i32.add + br_if) — safe to restart
+    const pure = [_]R{
+        .{ .op = regalloc_mod.OP_ADDI32, .rd = 0, .rs1 = 0, .operand = 1 },
+        .{ .op = regalloc_mod.OP_BR_IF, .rd = 0, .rs1 = 0, .operand = 0 },
+    };
+    try testing.expect(!Vm.hasNonRestartableSideEffects(&pure));
+
+    // Function with call — NOT safe to restart
+    const with_call = [_]R{
+        .{ .op = regalloc_mod.OP_ADDI32, .rd = 0, .rs1 = 0, .operand = 1 },
+        .{ .op = regalloc_mod.OP_CALL, .rd = 0, .rs1 = 0, .operand = 42 },
+        .{ .op = regalloc_mod.OP_BR_IF, .rd = 0, .rs1 = 0, .operand = 0 },
+    };
+    try testing.expect(Vm.hasNonRestartableSideEffects(&with_call));
+
+    // Function with global.set — NOT safe to restart
+    const with_global_set = [_]R{
+        .{ .op = 0x24, .rd = 0, .rs1 = 0, .operand = 0 }, // global.set
+        .{ .op = regalloc_mod.OP_BR_IF, .rd = 0, .rs1 = 0, .operand = 0 },
+    };
+    try testing.expect(Vm.hasNonRestartableSideEffects(&with_global_set));
+
+    // Function with call_indirect — NOT safe to restart
+    const with_call_indirect = [_]R{
+        .{ .op = regalloc_mod.OP_CALL_INDIRECT, .rd = 0, .rs1 = 0, .operand = 0 },
+    };
+    try testing.expect(Vm.hasNonRestartableSideEffects(&with_call_indirect));
 }
