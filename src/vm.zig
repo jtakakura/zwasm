@@ -6043,22 +6043,62 @@ fn truncSat(comptime I: type, comptime F: type, val: F) ?I {
 /// Truncate float to int with saturation (non-trapping version).
 fn truncSatClamp(comptime I: type, comptime F: type, val: F) I {
     if (math.isNan(val)) return 0;
-    const trunc_val = @trunc(val);
-    const info = @typeInfo(I).int;
-    const upper: F = comptime blk: {
-        const exp = if (info.signedness == .signed) info.bits - 1 else info.bits;
-        var r: F = 1.0;
-        for (0..exp) |_| r *= 2.0;
-        break :blk r;
-    };
-    if (info.signedness == .signed) {
-        if (trunc_val >= upper) return math.maxInt(I);
-        if (trunc_val < -upper) return math.minInt(I);
-    } else {
-        if (trunc_val >= upper) return math.maxInt(I);
-        if (trunc_val < 0.0) return 0;
+    if (!math.isFinite(val)) {
+        if (val > 0) return math.maxInt(I);
+        return if (@typeInfo(I).int.signedness == .signed) math.minInt(I) else 0;
     }
-    return @intFromFloat(trunc_val);
+    const trunc_val = @trunc(val);
+    if (trunc_val == 0) return 0;
+    return floatToIntBits(I, F, trunc_val);
+}
+
+/// Convert a finite, truncated float to integer via IEEE 754 bit extraction.
+/// Avoids @intFromFloat whose UB semantics let LLVM eliminate range checks on x86_64.
+fn floatToIntBits(comptime I: type, comptime F: type, val: F) I {
+    const info = @typeInfo(I).int;
+    const Bits = if (F == f32) u32 else u64;
+    const mantissa_bits: comptime_int = if (F == f32) 23 else 52;
+    const bias: i32 = if (F == f32) 127 else 1023;
+    const exp_bits: comptime_int = if (F == f32) 8 else 11;
+    const total_bits: comptime_int = if (F == f32) 32 else 64;
+
+    const bits: Bits = @bitCast(val);
+    const sign = bits >> (total_bits - 1) != 0;
+    const exp_raw: i32 = @intCast((bits >> mantissa_bits) & ((@as(Bits, 1) << exp_bits) - 1));
+    const exp = exp_raw - bias;
+
+    if (exp < 0) return 0;
+
+    const mantissa_mask: Bits = (@as(Bits, 1) << mantissa_bits) - 1;
+    const full_mantissa: u64 = (@as(u64, 1) << mantissa_bits) | @as(u64, bits & mantissa_mask);
+
+    const shift: i32 = exp - mantissa_bits;
+    // shift >= 64 means value >= 2^64, always out of range for any supported type
+    if (shift >= 64) {
+        if (info.signedness == .signed) return if (sign) math.minInt(I) else math.maxInt(I);
+        return if (sign) 0 else math.maxInt(I);
+    }
+    const abs_val: u64 = if (shift >= 0)
+        full_mantissa << @intCast(shift)
+    else if (-shift < 64)
+        full_mantissa >> @intCast(-shift)
+    else
+        0;
+
+    if (info.signedness == .signed) {
+        if (sign) {
+            const max_neg: u64 = @as(u64, 1) << @intCast(info.bits - 1);
+            if (abs_val > max_neg) return math.minInt(I);
+            return @intCast(-@as(i64, @intCast(abs_val)));
+        } else {
+            if (abs_val > @as(u64, @intCast(math.maxInt(I)))) return math.maxInt(I);
+            return @intCast(abs_val);
+        }
+    } else {
+        if (sign) return 0;
+        if (abs_val > math.maxInt(I)) return math.maxInt(I);
+        return @intCast(abs_val);
+    }
 }
 
 /// IEEE 754 roundToIntegralTiesToEven (Wasm nearest).

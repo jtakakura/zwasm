@@ -2361,12 +2361,42 @@ pub const Compiler = struct {
         const jp_patch = Enc.jccRel32(&self.code, self.alloc, .p);
 
         if (!is_i64) {
-            // i32 sat: convert to i64 first (full i32/u32 range fits without indefinite)
+            // i32 sat: convert to i64 first, then handle indefinite + clamp
             if (is_f64) {
                 Enc.cvttsd2si64(&self.code, self.alloc, SCRATCH, XMM0);
             } else {
                 Enc.cvttss2si64(&self.code, self.alloc, SCRATCH, XMM0);
             }
+            // Check for x86 integer indefinite (0x8000000000000000).
+            // CVTTSS2SI64/CVTTSD2SI64 returns this for +Inf, -Inf, and values outside i64 range.
+            self.emitLoadImm64(SCRATCH2, 0x8000000000000000);
+            Enc.cmpRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2);
+            const jne_valid = Enc.jccRel32(&self.code, self.alloc, .ne);
+            // Indefinite: check original float sign to determine saturation direction
+            Enc.xorpd(&self.code, self.alloc, XMM1, XMM1);
+            if (is_f64) {
+                Enc.ucomisd(&self.code, self.alloc, XMM0, XMM1);
+            } else {
+                Enc.ucomiss(&self.code, self.alloc, XMM0, XMM1);
+            }
+            if (is_unsigned) {
+                const jae_pos = Enc.jccRel32(&self.code, self.alloc, .ae);
+                Enc.xorRegReg32(&self.code, self.alloc, SCRATCH, SCRATCH); // negative → 0
+                const jmp_indef_done = Enc.jmpRel32(&self.code, self.alloc);
+                Enc.patchRel32(self.code.items, jae_pos, self.currentOffset());
+                self.emitLoadImm64(SCRATCH, 0xFFFFFFFF); // positive → UINT32_MAX
+                Enc.patchRel32(self.code.items, jmp_indef_done, self.currentOffset());
+            } else {
+                const jae_pos = Enc.jccRel32(&self.code, self.alloc, .ae);
+                self.emitLoadImm64(SCRATCH, @bitCast(@as(i64, -2147483648))); // negative → INT32_MIN
+                const jmp_indef_done = Enc.jmpRel32(&self.code, self.alloc);
+                Enc.patchRel32(self.code.items, jae_pos, self.currentOffset());
+                self.emitLoadImm64(SCRATCH, @bitCast(@as(i64, 2147483647))); // positive → INT32_MAX
+                Enc.patchRel32(self.code.items, jmp_indef_done, self.currentOffset());
+            }
+            const jmp_done_indef = Enc.jmpRel32(&self.code, self.alloc);
+            Enc.patchRel32(self.code.items, jne_valid, self.currentOffset());
+            // Valid i64 result (not indefinite): clamp to i32/u32 range
             if (is_unsigned) {
                 // Clamp to [0, 0xFFFFFFFF]
                 Enc.testRegReg(&self.code, self.alloc, SCRATCH, SCRATCH);
@@ -2395,6 +2425,7 @@ pub const Compiler = struct {
                 Enc.patchRel32(self.code.items, jle_ok, self.currentOffset());
                 Enc.patchRel32(self.code.items, jmp_done1, self.currentOffset());
             }
+            Enc.patchRel32(self.code.items, jmp_done_indef, self.currentOffset());
         } else {
             // i64 sat: CVTT to i64 directly
             if (is_f64) {
@@ -2403,26 +2434,47 @@ pub const Compiler = struct {
                 Enc.cvttss2si64(&self.code, self.alloc, SCRATCH, XMM0);
             }
             if (is_unsigned) {
-                // For unsigned i64 sat: values >= 2^63 or negative need special handling.
-                // CVTT returns 0x8000000000000000 (indefinite) for out-of-range.
-                // Clamp: negative → 0, > UINT64_MAX → UINT64_MAX
+                // Unsigned i64 sat: CVTTSS2SI64 only handles [0, 2^63).
+                // Values in [2^63, 2^64) need subtract-and-add-back.
+                // Values >= 2^64 or +Inf → UINT64_MAX. Negative → 0.
                 Enc.testRegReg(&self.code, self.alloc, SCRATCH, SCRATCH);
                 const jns_ok = Enc.jccRel32(&self.code, self.alloc, .ns);
-                // Indefinite result: check if source was actually negative
-                // XORPD xmm1,xmm1 + UCOMISD xmm0,xmm1 → check if src < 0
+                // Result is negative (indefinite or actual negative):
+                // Check original float to determine: negative → 0, [2^63, 2^64) → convert, >= 2^64 → MAX
                 Enc.xorpd(&self.code, self.alloc, XMM1, XMM1);
                 if (is_f64) {
                     Enc.ucomisd(&self.code, self.alloc, XMM0, XMM1);
                 } else {
                     Enc.ucomiss(&self.code, self.alloc, XMM0, XMM1);
                 }
-                const jae_large = Enc.jccRel32(&self.code, self.alloc, .ae);
+                const jae_positive = Enc.jccRel32(&self.code, self.alloc, .ae);
                 // Negative → 0
                 Enc.xorRegReg32(&self.code, self.alloc, SCRATCH, SCRATCH);
                 const jmp_done_neg = Enc.jmpRel32(&self.code, self.alloc);
-                Enc.patchRel32(self.code.items, jae_large, self.currentOffset());
-                // Positive but too large → UINT64_MAX
+                Enc.patchRel32(self.code.items, jae_positive, self.currentOffset());
+                // Positive but >= 2^63: subtract 2^63 from float, convert, add back
+                // Load 2^63 as float into XMM1
+                if (is_f64) {
+                    self.emitLoadImm64(SCRATCH2, 0x43E0000000000000); // f64(2^63)
+                    Enc.movqToXmm(&self.code, self.alloc, XMM1, SCRATCH2);
+                    Enc.subsd(&self.code, self.alloc, XMM0, XMM1); // XMM0 -= 2^63
+                    Enc.cvttsd2si64(&self.code, self.alloc, SCRATCH, XMM0);
+                } else {
+                    self.emitLoadImm64(SCRATCH2, 0x5F000000); // f32(2^63)
+                    Enc.movdToXmm(&self.code, self.alloc, XMM1, SCRATCH2);
+                    Enc.subss(&self.code, self.alloc, XMM0, XMM1); // XMM0 -= 2^63
+                    Enc.cvttss2si64(&self.code, self.alloc, SCRATCH, XMM0);
+                }
+                // If still indefinite after subtraction → value >= 2^64 → UINT64_MAX
+                Enc.testRegReg(&self.code, self.alloc, SCRATCH, SCRATCH);
+                const jns_converted = Enc.jccRel32(&self.code, self.alloc, .ns);
                 self.emitLoadImm64(SCRATCH, 0xFFFFFFFFFFFFFFFF);
+                const jmp_done_max = Enc.jmpRel32(&self.code, self.alloc);
+                Enc.patchRel32(self.code.items, jns_converted, self.currentOffset());
+                // Add 2^63 back (as integer)
+                self.emitLoadImm64(SCRATCH2, 0x8000000000000000);
+                Enc.addRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2);
+                Enc.patchRel32(self.code.items, jmp_done_max, self.currentOffset());
                 Enc.patchRel32(self.code.items, jmp_done_neg, self.currentOffset());
                 Enc.patchRel32(self.code.items, jns_ok, self.currentOffset());
             } else {
