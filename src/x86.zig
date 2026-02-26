@@ -591,6 +591,14 @@ const Enc = struct {
         buf.append(alloc, modrm(0b11, 0, dst.low3())) catch {};
     }
 
+    /// CMOVcc r64, r64: REX.W 0F 4x /r (conditional move, 64-bit)
+    fn cmovcc64(buf: *std.ArrayList(u8), alloc: Allocator, cc: Cond, dst: Reg, src: Reg) void {
+        buf.append(alloc, rexW(dst, src)) catch {};
+        buf.append(alloc, 0x0F) catch {};
+        buf.append(alloc, 0x40 + @as(u8, @intFromEnum(cc))) catch {};
+        buf.append(alloc, modrmReg(dst, src)) catch {};
+    }
+
     /// MOVZX r32, r8: 0F B6 /r (zero-extend byte to 32-bit, then to 64-bit)
     fn movzxByte(buf: *std.ArrayList(u8), alloc: Allocator, dst: Reg, src: Reg) void {
         // Need REX prefix if src is SPL/BPL/SIL/DIL or any extended register
@@ -1105,6 +1113,11 @@ fn computeCallLiveSet(ir: []const RegInstr, call_pc: u32) u32 {
         if (jit_arm64.Compiler.instrHasRs2(instr)) {
             markCallerSavedUse(&live, &resolved, instr.rs2());
         }
+        // select: condition register stored in operand
+        if (instr.op == 0x1B) {
+            const cond_vreg: u16 = @truncate(instr.operand);
+            markCallerSavedUse(&live, &resolved, cond_vreg);
+        }
 
         if (jit_arm64.Compiler.instrDefinesRd(instr)) {
             if (isCallerSavedVreg(instr.rd)) {
@@ -1380,6 +1393,40 @@ pub const Compiler = struct {
                 Enc.loadDisp32(&self.code, self.alloc, phys, REGS_PTR, disp);
             }
         }
+    }
+
+    /// Emit br_table: cascading CMP + JE for each target, default at end.
+    /// IR layout: [OP_BR_TABLE rd=idx, operand=count], [NOP operand=target0], ..., [NOP operand=default_target]
+    fn emitBrTable(self: *Compiler, instr: RegInstr, ir: []const RegInstr, pc: *u32) bool {
+        const count = instr.operand;
+        const idx_reg = self.getOrLoad(instr.rd, SCRATCH);
+
+        // Read count+1 entries (count case targets + 1 default)
+        var i: u32 = 0;
+        while (i < count + 1 and pc.* < ir.len) : (i += 1) {
+            const entry = ir[pc.*];
+            pc.* += 1;
+
+            if (i < count) {
+                // Case i: CMP idx, i; JE target
+                Enc.cmpImm32(&self.code, self.alloc, idx_reg, i);
+                const patch_off = Enc.jccRel32(&self.code, self.alloc, .e);
+                self.patches.append(self.alloc, .{
+                    .rel32_offset = patch_off,
+                    .target_pc = entry.operand,
+                    .kind = .jcc,
+                }) catch return false;
+            } else {
+                // Default: unconditional jump
+                const patch_off = Enc.jmpRel32(&self.code, self.alloc);
+                self.patches.append(self.alloc, .{
+                    .rel32_offset = patch_off,
+                    .target_pc = entry.operand,
+                    .kind = .jmp,
+                }) catch return false;
+            }
+        }
+        return true;
     }
 
     fn emitEpilogue(self: *Compiler, result_vreg: ?u16) void {
@@ -2293,6 +2340,124 @@ pub const Compiler = struct {
         self.emitTruncToI64(instr, true, signed);
     }
 
+    /// Saturating truncation: clamp instead of trap on NaN/overflow.
+    /// i32 variants: CVTT to i64 (avoids indefinite ambiguity), then clamp.
+    /// i64 variants: CVTT to i64, check for indefinite, clamp.
+    fn emitTruncSat(self: *Compiler, instr: RegInstr) void {
+        const sub = @as(u8, @truncate(instr.op & 0xFF));
+        const is_f64 = (sub & 0x02) != 0;
+        const is_unsigned = (sub & 0x01) != 0;
+        const is_i64 = (sub & 0x04) != 0;
+
+        self.loadFpToXmm(XMM0, instr.rs1);
+
+        // NaN check: UCOMISD/UCOMISS xmm0, xmm0 → PF set if NaN
+        if (is_f64) {
+            Enc.ucomisd(&self.code, self.alloc, XMM0, XMM0);
+        } else {
+            Enc.ucomiss(&self.code, self.alloc, XMM0, XMM0);
+        }
+        // JP nan_handler → result = 0
+        const jp_patch = Enc.jccRel32(&self.code, self.alloc, .p);
+
+        if (!is_i64) {
+            // i32 sat: convert to i64 first (full i32/u32 range fits without indefinite)
+            if (is_f64) {
+                Enc.cvttsd2si64(&self.code, self.alloc, SCRATCH, XMM0);
+            } else {
+                Enc.cvttss2si64(&self.code, self.alloc, SCRATCH, XMM0);
+            }
+            if (is_unsigned) {
+                // Clamp to [0, 0xFFFFFFFF]
+                Enc.testRegReg(&self.code, self.alloc, SCRATCH, SCRATCH);
+                const jns_ok = Enc.jccRel32(&self.code, self.alloc, .ns);
+                Enc.xorRegReg32(&self.code, self.alloc, SCRATCH, SCRATCH); // negative → 0
+                const jmp_done1 = Enc.jmpRel32(&self.code, self.alloc);
+                Enc.patchRel32(self.code.items, jns_ok, self.currentOffset());
+                self.emitLoadImm64(SCRATCH2, 0xFFFFFFFF);
+                Enc.cmpRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2);
+                const jbe_ok = Enc.jccRel32(&self.code, self.alloc, .be);
+                Enc.movRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2); // too large → UINT32_MAX
+                Enc.patchRel32(self.code.items, jbe_ok, self.currentOffset());
+                Enc.patchRel32(self.code.items, jmp_done1, self.currentOffset());
+            } else {
+                // Clamp to [-2^31, 2^31-1]
+                self.emitLoadImm64(SCRATCH2, @bitCast(@as(i64, -2147483648)));
+                Enc.cmpRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2);
+                const jge_min = Enc.jccRel32(&self.code, self.alloc, .ge);
+                Enc.movRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2); // too negative → INT32_MIN
+                const jmp_done1 = Enc.jmpRel32(&self.code, self.alloc);
+                Enc.patchRel32(self.code.items, jge_min, self.currentOffset());
+                self.emitLoadImm64(SCRATCH2, @bitCast(@as(i64, 2147483647)));
+                Enc.cmpRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2);
+                const jle_ok = Enc.jccRel32(&self.code, self.alloc, .le);
+                Enc.movRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2); // too large → INT32_MAX
+                Enc.patchRel32(self.code.items, jle_ok, self.currentOffset());
+                Enc.patchRel32(self.code.items, jmp_done1, self.currentOffset());
+            }
+        } else {
+            // i64 sat: CVTT to i64 directly
+            if (is_f64) {
+                Enc.cvttsd2si64(&self.code, self.alloc, SCRATCH, XMM0);
+            } else {
+                Enc.cvttss2si64(&self.code, self.alloc, SCRATCH, XMM0);
+            }
+            if (is_unsigned) {
+                // For unsigned i64 sat: values >= 2^63 or negative need special handling.
+                // CVTT returns 0x8000000000000000 (indefinite) for out-of-range.
+                // Clamp: negative → 0, > UINT64_MAX → UINT64_MAX
+                Enc.testRegReg(&self.code, self.alloc, SCRATCH, SCRATCH);
+                const jns_ok = Enc.jccRel32(&self.code, self.alloc, .ns);
+                // Indefinite result: check if source was actually negative
+                // XORPD xmm1,xmm1 + UCOMISD xmm0,xmm1 → check if src < 0
+                Enc.xorpd(&self.code, self.alloc, XMM1, XMM1);
+                if (is_f64) {
+                    Enc.ucomisd(&self.code, self.alloc, XMM0, XMM1);
+                } else {
+                    Enc.ucomiss(&self.code, self.alloc, XMM0, XMM1);
+                }
+                const jae_large = Enc.jccRel32(&self.code, self.alloc, .ae);
+                // Negative → 0
+                Enc.xorRegReg32(&self.code, self.alloc, SCRATCH, SCRATCH);
+                const jmp_done_neg = Enc.jmpRel32(&self.code, self.alloc);
+                Enc.patchRel32(self.code.items, jae_large, self.currentOffset());
+                // Positive but too large → UINT64_MAX
+                self.emitLoadImm64(SCRATCH, 0xFFFFFFFFFFFFFFFF);
+                Enc.patchRel32(self.code.items, jmp_done_neg, self.currentOffset());
+                Enc.patchRel32(self.code.items, jns_ok, self.currentOffset());
+            } else {
+                // Signed i64 sat: indefinite (0x8000000000000000) could be valid INT64_MIN or overflow.
+                // Check if CVTT returned indefinite, then check sign of source.
+                self.emitLoadImm64(SCRATCH2, 0x8000000000000000);
+                Enc.cmpRegReg(&self.code, self.alloc, SCRATCH, SCRATCH2);
+                const jne_ok = Enc.jccRel32(&self.code, self.alloc, .ne);
+                // Indefinite: check if source > 0 (positive overflow)
+                Enc.xorpd(&self.code, self.alloc, XMM1, XMM1);
+                if (is_f64) {
+                    Enc.ucomisd(&self.code, self.alloc, XMM0, XMM1);
+                } else {
+                    Enc.ucomiss(&self.code, self.alloc, XMM0, XMM1);
+                }
+                const jbe_neg = Enc.jccRel32(&self.code, self.alloc, .be);
+                // Positive overflow → INT64_MAX
+                self.emitLoadImm64(SCRATCH, 0x7FFFFFFFFFFFFFFF);
+                Enc.patchRel32(self.code.items, jbe_neg, self.currentOffset());
+                // Negative overflow → INT64_MIN (already in SCRATCH from CVTT)
+                Enc.patchRel32(self.code.items, jne_ok, self.currentOffset());
+            }
+        }
+
+        // Jump past NaN handler
+        const jmp_done = Enc.jmpRel32(&self.code, self.alloc);
+
+        // NaN handler: result = 0
+        Enc.patchRel32(self.code.items, jp_patch, self.currentOffset());
+        Enc.xorRegReg32(&self.code, self.alloc, SCRATCH, SCRATCH);
+
+        Enc.patchRel32(self.code.items, jmp_done, self.currentOffset());
+        self.storeVreg(instr.rd, SCRATCH);
+    }
+
     /// Emit unsigned i64 → f64/f32 conversion.
     /// x86 has no unsigned i64→float instruction, so we branch on the sign bit:
     /// - If < 2^63: direct signed conversion (value is the same)
@@ -2648,6 +2813,32 @@ pub const Compiler = struct {
             regalloc_mod.OP_RETURN_VOID => self.emitEpilogue(null),
             regalloc_mod.OP_NOP, regalloc_mod.OP_BLOCK_END, regalloc_mod.OP_DELETED => {},
 
+            // --- Select ---
+            0x1B => { // select: rd = cond ? val1 : val2
+                const val2_idx = instr.rs2_field;
+                const cond_idx: u16 = @truncate(instr.operand);
+                // Compare condition first (before clobbering scratch regs)
+                const cond_reg = self.getOrLoad(cond_idx, SCRATCH);
+                Enc.testRegReg(&self.code, self.alloc, cond_reg, cond_reg);
+                // Load val1 into destination
+                const d = vregToPhys(instr.rd) orelse SCRATCH;
+                const val1 = self.getOrLoad(instr.rs1, d);
+                if (val1 != d) Enc.movRegReg(&self.code, self.alloc, d, val1);
+                // Load val2 into SCRATCH2
+                const val2_reg = self.getOrLoad(val2_idx, SCRATCH2);
+                // CMOVNE: if cond == 0, overwrite d with val2 → CMOVE d, val2
+                Enc.cmovcc64(&self.code, self.alloc, .e, d, val2_reg);
+                if (vregToPhys(instr.rd) == null) self.storeVreg(instr.rd, d);
+            },
+
+            // --- Drop ---
+            0x1A => {}, // no-op
+
+            // --- br_table ---
+            regalloc_mod.OP_BR_TABLE => {
+                if (!self.emitBrTable(instr, ir, pc)) return false;
+            },
+
             // --- Global ops ---
             0x23 => self.emitGlobalGet(instr), // global.get
             0x24 => self.emitGlobalSet(instr), // global.set
@@ -2857,6 +3048,13 @@ pub const Compiler = struct {
             0xC2 => self.emitSignExt(instr, 8, true),  // i64.extend8_s
             0xC3 => self.emitSignExt(instr, 16, true),  // i64.extend16_s
             0xC4 => self.emitSignExt(instr, 32, true),  // i64.extend32_s
+
+            // --- Saturating truncation (0xFC prefix) ---
+            0xFC00, 0xFC01, // i32.trunc_sat_f32_s/u
+            0xFC02, 0xFC03, // i32.trunc_sat_f64_s/u
+            0xFC04, 0xFC05, // i64.trunc_sat_f32_s/u
+            0xFC06, 0xFC07, // i64.trunc_sat_f64_s/u
+            => self.emitTruncSat(instr),
 
             else => return false, // Unsupported — bail out to interpreter
         }

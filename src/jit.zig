@@ -1267,6 +1267,11 @@ pub const Compiler = struct {
             if (instrHasRs2(instr)) {
                 markCallerSavedUse(&live, &resolved, instr.rs2());
             }
+            // select: condition register stored in operand
+            if (instr.op == 0x1B) {
+                const cond_vreg: u16 = @truncate(instr.operand);
+                markCallerSavedUse(&live, &resolved, cond_vreg);
+            }
 
             // Check definition (rd) — if defined before used, vreg is dead
             if (instrDefinesRd(instr)) {
@@ -1319,6 +1324,8 @@ pub const Compiler = struct {
             0x46...0x8A, 0x92...0x97, 0xA0...0xA6,
             // memory.fill/copy have rs2 in operand
             regalloc_mod.OP_MEMORY_FILL, regalloc_mod.OP_MEMORY_COPY,
+            // select: rs2_field = val2
+            0x1B,
             => true,
             else => false,
         };
@@ -1736,6 +1743,79 @@ pub const Compiler = struct {
         // Load results: mem_base = regs[reg_count], mem_size = regs[reg_count+1]
         self.emit(a64.ldr64(MEM_BASE, REGS_PTR, @as(u16, self.reg_count) * 8));
         self.emit(a64.ldr64(MEM_SIZE, REGS_PTR, @as(u16, self.reg_count) * 8 + 8));
+    }
+
+    /// Saturating truncation: FCVTZS/FCVTZU without trapping on NaN/overflow.
+    fn emitTruncSat(self: *Compiler, instr: RegInstr) void {
+        const sub = @as(u8, @truncate(instr.op & 0xFF)); // 0x00..0x07
+        const is_f64 = (sub & 0x02) != 0; // bit 1: f64 vs f32
+        const is_unsigned = (sub & 0x01) != 0; // bit 0: unsigned vs signed
+        const is_i64 = (sub & 0x04) != 0; // bit 2: i64 vs i32
+        const src = self.getOrLoad(instr.rs1, SCRATCH);
+        const d = destReg(instr.rd);
+
+        // Move source to FP register
+        if (is_f64) {
+            self.emit(a64.fmovToFp64(FP_SCRATCH0, src));
+        } else {
+            self.emit(a64.fmovToFp32(FP_SCRATCH0, src));
+        }
+
+        // FCVTZS/FCVTZU — ARM64 saturates automatically
+        if (is_i64) {
+            if (is_unsigned) {
+                if (is_f64) self.emit(a64.fcvtzu_x_d(d, FP_SCRATCH0))
+                else self.emit(a64.fcvtzu_x_s(d, FP_SCRATCH0));
+            } else {
+                if (is_f64) self.emit(a64.fcvtzs_x_d(d, FP_SCRATCH0))
+                else self.emit(a64.fcvtzs_x_s(d, FP_SCRATCH0));
+            }
+        } else {
+            if (is_unsigned) {
+                if (is_f64) self.emit(a64.fcvtzu_w_d(d, FP_SCRATCH0))
+                else self.emit(a64.fcvtzu_w_s(d, FP_SCRATCH0));
+            } else {
+                if (is_f64) self.emit(a64.fcvtzs_w_d(d, FP_SCRATCH0))
+                else self.emit(a64.fcvtzs_w_s(d, FP_SCRATCH0));
+            }
+        }
+        self.storeVreg(instr.rd, d);
+    }
+
+    /// Emit br_table: cascading CMP + B.EQ for each target, default B at end.
+    fn emitBrTable(self: *Compiler, instr: RegInstr, ir: []const RegInstr, pc: *u32) bool {
+        const count = instr.operand;
+        if (count > 4095) return false; // Too many cases for CMP imm12
+        const idx_reg = self.getOrLoad(instr.rd, SCRATCH);
+        self.fpCacheEvictAll();
+
+        var i: u32 = 0;
+        while (i < count + 1 and pc.* < ir.len) : (i += 1) {
+            const entry = ir[pc.*];
+            pc.* += 1;
+
+            if (i < count) {
+                // Case i: CMP idx, i; B.EQ target
+                self.emit(a64.cmpImm32(idx_reg, @intCast(i)));
+                const arm_idx = self.currentIdx();
+                self.emit(a64.bCond(.eq, 0)); // placeholder
+                self.patches.append(self.alloc, .{
+                    .arm64_idx = arm_idx,
+                    .target_pc = entry.operand,
+                    .kind = .b_cond,
+                }) catch return false;
+            } else {
+                // Default: unconditional branch
+                const arm_idx = self.currentIdx();
+                self.emit(a64.b(0)); // placeholder
+                self.patches.append(self.alloc, .{
+                    .arm64_idx = arm_idx,
+                    .target_pc = entry.operand,
+                    .kind = .b,
+                }) catch return false;
+            }
+        }
+        return true;
     }
 
     fn emitEpilogue(self: *Compiler, result_vreg: ?u16) void {
@@ -2438,6 +2518,11 @@ pub const Compiler = struct {
             // --- Drop ---
             0x1A => {}, // no-op
 
+            // --- br_table ---
+            regalloc_mod.OP_BR_TABLE => {
+                if (!self.emitBrTable(instr, ir, pc)) return false;
+            },
+
             // --- Unreachable ---
             0x00 => {
                 self.emitErrorReturn(1); // Trap
@@ -2461,6 +2546,13 @@ pub const Compiler = struct {
             // --- Bulk memory: fill/copy ---
             regalloc_mod.OP_MEMORY_FILL => self.emitMemFill(instr),
             regalloc_mod.OP_MEMORY_COPY => self.emitMemCopy(instr),
+
+            // --- Saturating truncation (0xFC prefix) ---
+            0xFC00, 0xFC01, // i32.trunc_sat_f32_s/u
+            0xFC02, 0xFC03, // i32.trunc_sat_f64_s/u
+            0xFC04, 0xFC05, // i64.trunc_sat_f32_s/u
+            0xFC06, 0xFC07, // i64.trunc_sat_f64_s/u
+            => self.emitTruncSat(instr),
 
             // Unsupported opcode — bail out, function can't be JIT compiled
             else => return false,
