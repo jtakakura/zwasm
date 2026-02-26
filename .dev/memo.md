@@ -15,17 +15,20 @@ Session handover document. Read at session start.
 Reliability improvement (branch: `strictly-check/reliability-003`).
 Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`.
 
-Phases A-I complete. E2E 792/792 (100%), FP precision fixed.
-**Next**: Phase J (x86_64 JIT), K (perf), H (docs).
+Phases A-J complete. E2E 792/792 (100%), x86_64 JIT bugs fixed.
+**Next**: Phase K (perf), H (docs).
 
 ## Previous Task
 
-I.0-I.7: Phase I complete. FP precision fix (JIT getOrLoad dirty FP cache),
-E2E 792/792 (100%), all real-world C/C++/Rust match wasmtime exactly.
+J.1-J.3: Phase J complete. x86_64 JIT bug fixes:
+- Division safety (SIGFPE): zero check, overflow, signed rem fixup
+- ABI register clobbering: global.set, mem ops read vregs before clobbering RDI
+- SCRATCH2/vreg10 alias: R11 reserved exclusively for SCRATCH2 (10→9 phys regs)
+- Call liveness: rd treated as USE for return/store/branch in computeCallLiveSet
 
 ## Known Bugs
 
-- x86_64 JIT: 6 real-world programs crash/OOB on Ubuntu (pass without JIT)
+- c_hello_wasi: EXIT=71 on Ubuntu (WASI issue, not JIT — same with --profile)
 - Go WASI: 3 Go programs produce no output (WASI compatibility, not JIT-related)
 
 ## References
