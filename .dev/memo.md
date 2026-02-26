@@ -16,7 +16,8 @@ Reliability improvement (branch: `strictly-check/reliability-003`).
 Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`.
 
 Phases A-J complete. E2E 792/792 (100%), x86_64 JIT bugs fixed.
-**Next**: Phase K (perf), H (docs).
+**Phase K** (perf): div-by-constant (UMULL+LSR), FP-direct load/store, const-folded ADD/SUB.
+tgo_strops 38.8→30.3ms (22% faster). Investigating next bottleneck targets.
 
 ## Previous Task
 
