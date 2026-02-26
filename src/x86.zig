@@ -1614,11 +1614,13 @@ pub const Compiler = struct {
     /// global.set: call jitGlobalSet(instance, idx, val)
     fn emitGlobalSet(self: *Compiler, instr: RegInstr) void {
         self.spillCallerSaved();
-        // System V ABI: RDI=instance, ESI=global_idx, RDX=value
-        self.emitLoadInstPtr(.rdi);
-        self.emitLoadImm32(.rsi, @truncate(instr.operand));
+        // Load value to RDX FIRST — before clobbering RDI/RSI with call args.
+        // The value vreg may be in RDI or RSI (caller-saved, still valid after spill).
         const val_reg = self.getOrLoad(instr.rd, SCRATCH);
         Enc.movRegReg(&self.code, self.alloc, .rdx, val_reg);
+        // System V ABI: RDI=instance, ESI=global_idx, RDX=value (already set)
+        self.emitLoadInstPtr(.rdi);
+        self.emitLoadImm32(.rsi, @truncate(instr.operand));
         // CALL jitGlobalSet
         self.emitLoadImm64(SCRATCH, self.global_set_addr);
         Enc.callReg(&self.code, self.alloc, SCRATCH);
@@ -1788,10 +1790,11 @@ pub const Compiler = struct {
     /// Emit memory.grow via trampoline call.
     fn emitMemGrow(self: *Compiler, instr: RegInstr) void {
         self.spillCallerSaved();
-        // System V: RDI=instance, RSI=pages
-        self.emitLoadInstPtr(.rdi);
+        // Load pages BEFORE clobbering RDI — value may be in RDI (vreg 4)
         const pages_reg = self.getOrLoad(instr.rs1, SCRATCH);
         Enc.movRegReg32(&self.code, self.alloc, .rsi, pages_reg);
+        // System V: RDI=instance, RSI=pages (already set)
+        self.emitLoadInstPtr(.rdi);
         // CALL jitMemGrow
         self.emitLoadImm64(SCRATCH, self.mem_grow_addr);
         Enc.callReg(&self.code, self.alloc, SCRATCH);
@@ -1811,14 +1814,17 @@ pub const Compiler = struct {
     /// Emit memory.fill via trampoline call.
     fn emitMemFill(self: *Compiler, instr: RegInstr) void {
         self.spillCallerSaved();
+        // Spill all arg vregs then load from memory to avoid register conflicts.
+        // getOrLoad returns physical registers that may alias ABI arg registers;
+        // loading from regs[] after spill avoids all clobbering issues.
+        self.spillVreg(instr.rd);
+        self.spillVreg(instr.rs1);
+        self.spillVreg(instr.rs2());
         // System V: RDI=instance, ESI=dst, EDX=val, ECX=n
+        Enc.loadDisp32(&self.code, self.alloc, .rsi, REGS_PTR, @as(i32, instr.rd) * 8);
+        Enc.loadDisp32(&self.code, self.alloc, .rdx, REGS_PTR, @as(i32, instr.rs1) * 8);
+        Enc.loadDisp32(&self.code, self.alloc, .rcx, REGS_PTR, @as(i32, instr.rs2()) * 8);
         self.emitLoadInstPtr(.rdi);
-        const dst_reg = self.getOrLoad(instr.rd, SCRATCH);
-        Enc.movRegReg32(&self.code, self.alloc, .rsi, dst_reg);
-        const val_reg = self.getOrLoad(instr.rs1, SCRATCH);
-        Enc.movRegReg32(&self.code, self.alloc, .rdx, val_reg);
-        const n_reg = self.getOrLoad(instr.rs2(), SCRATCH);
-        Enc.movRegReg32(&self.code, self.alloc, .rcx, n_reg);
         // CALL jitMemFill
         self.emitLoadImm64(SCRATCH, self.mem_fill_addr);
         Enc.callReg(&self.code, self.alloc, SCRATCH);
@@ -1832,14 +1838,15 @@ pub const Compiler = struct {
     /// Emit memory.copy via trampoline call.
     fn emitMemCopy(self: *Compiler, instr: RegInstr) void {
         self.spillCallerSaved();
+        // Spill all arg vregs then load from memory to avoid register conflicts.
+        self.spillVreg(instr.rd);
+        self.spillVreg(instr.rs1);
+        self.spillVreg(instr.rs2());
         // System V: RDI=instance, ESI=dst, EDX=src, ECX=n
+        Enc.loadDisp32(&self.code, self.alloc, .rsi, REGS_PTR, @as(i32, instr.rd) * 8);
+        Enc.loadDisp32(&self.code, self.alloc, .rdx, REGS_PTR, @as(i32, instr.rs1) * 8);
+        Enc.loadDisp32(&self.code, self.alloc, .rcx, REGS_PTR, @as(i32, instr.rs2()) * 8);
         self.emitLoadInstPtr(.rdi);
-        const dst_reg = self.getOrLoad(instr.rd, SCRATCH);
-        Enc.movRegReg32(&self.code, self.alloc, .rsi, dst_reg);
-        const src_reg = self.getOrLoad(instr.rs1, SCRATCH);
-        Enc.movRegReg32(&self.code, self.alloc, .rdx, src_reg);
-        const n_reg = self.getOrLoad(instr.rs2(), SCRATCH);
-        Enc.movRegReg32(&self.code, self.alloc, .rcx, n_reg);
         // CALL jitMemCopy
         self.emitLoadImm64(SCRATCH, self.mem_copy_addr);
         Enc.callReg(&self.code, self.alloc, SCRATCH);
@@ -3241,6 +3248,14 @@ pub const Compiler = struct {
             }
         }
 
+        // Move divisor out of RAX/RDX BEFORE we clobber them.
+        // RAX is clobbered by MOV dividend, RDX by CDQ/XOR zero-extension.
+        var actual_divisor = divisor;
+        if (divisor == .rax or divisor == .rdx) {
+            Enc.movRegReg(&self.code, self.alloc, SCRATCH2, divisor);
+            actual_divisor = SCRATCH2;
+        }
+
         // Save RDX if it holds a live vreg (vreg 6)
         const rdx_live = vregToPhys(6) != null and 6 < self.reg_count;
         if (rdx_live) Enc.push(&self.code, self.alloc, .rdx);
@@ -3248,24 +3263,13 @@ pub const Compiler = struct {
         // Move dividend to EAX
         if (r1 != .rax) Enc.movRegReg32(&self.code, self.alloc, .rax, r1);
 
-        // Sign/zero-extend EAX to EDX:EAX
+        // Sign/zero-extend EAX to EDX:EAX, then divide
         if (signed) {
             Enc.cdq(&self.code, self.alloc);
-            // Ensure divisor is not in RAX or RDX
-            if (divisor == .rax or divisor == .rdx) {
-                Enc.movRegReg(&self.code, self.alloc, SCRATCH2, divisor);
-                Enc.idivReg32(&self.code, self.alloc, SCRATCH2);
-            } else {
-                Enc.idivReg32(&self.code, self.alloc, divisor);
-            }
+            Enc.idivReg32(&self.code, self.alloc, actual_divisor);
         } else {
             Enc.xorRegReg32(&self.code, self.alloc, .rdx, .rdx);
-            if (divisor == .rax or divisor == .rdx) {
-                Enc.movRegReg(&self.code, self.alloc, SCRATCH2, divisor);
-                Enc.divReg32(&self.code, self.alloc, SCRATCH2);
-            } else {
-                Enc.divReg32(&self.code, self.alloc, divisor);
-            }
+            Enc.divReg32(&self.code, self.alloc, actual_divisor);
         }
 
         // Result: quotient in EAX, remainder in EDX
@@ -3310,6 +3314,13 @@ pub const Compiler = struct {
             }
         }
 
+        // Move divisor out of RAX/RDX BEFORE we clobber them.
+        var actual_divisor = divisor;
+        if (divisor == .rax or divisor == .rdx) {
+            Enc.movRegReg(&self.code, self.alloc, SCRATCH2, divisor);
+            actual_divisor = SCRATCH2;
+        }
+
         const rdx_live = vregToPhys(6) != null and 6 < self.reg_count;
         if (rdx_live) Enc.push(&self.code, self.alloc, .rdx);
 
@@ -3317,20 +3328,10 @@ pub const Compiler = struct {
 
         if (signed) {
             Enc.cqo(&self.code, self.alloc);
-            if (divisor == .rax or divisor == .rdx) {
-                Enc.movRegReg(&self.code, self.alloc, SCRATCH2, divisor);
-                Enc.idivReg(&self.code, self.alloc, SCRATCH2);
-            } else {
-                Enc.idivReg(&self.code, self.alloc, divisor);
-            }
+            Enc.idivReg(&self.code, self.alloc, actual_divisor);
         } else {
             Enc.xorRegReg32(&self.code, self.alloc, .rdx, .rdx);
-            if (divisor == .rax or divisor == .rdx) {
-                Enc.movRegReg(&self.code, self.alloc, SCRATCH2, divisor);
-                Enc.divReg(&self.code, self.alloc, SCRATCH2);
-            } else {
-                Enc.divReg(&self.code, self.alloc, divisor);
-            }
+            Enc.divReg(&self.code, self.alloc, actual_divisor);
         }
 
         const result_reg: Reg = if (is_rem) .rdx else .rax;
