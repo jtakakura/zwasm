@@ -33,6 +33,7 @@
   - Cover: integer math, FP math, string/array ops, recursion, I/O, env vars,
     CLI args, data structures, bitwise ops, memory alloc, control flow, etc.
   - All must PASS on Mac + Ubuntu (DIFF = 0)
+  - and also add realworld benchmarks (run_bench.sh, record.sh, compare_runtimes.sh, record_comparison.sh)
 
 #### Merge + Phase H
 - [ ] **R6**: Phase H Gate — all 9 conditions pass (Mac + Ubuntu)

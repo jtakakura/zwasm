@@ -21,7 +21,7 @@ Plan: `@./.dev/reliability-plan.md`. Progress: `@./.dev/reliability-handover.md`
 - [ ] R2: Go WASI fix (3 programs no output)
 - [ ] R3: cpp_string_ops Ubuntu fix (25000 vs 24995)
 - [ ] R4: c_hello_wasi Ubuntu fix (EXIT=71)
-- [ ] R5: Add 18 new real-world test programs (12 → 30, all PASS)
+- [ ] R5: Add 18 new real-world test programs (12 → 30, all PASS) and benchmarks
 - [ ] R6: Phase H Gate pass (all 9 conditions)
 - [ ] R7: Merge to main, push, CI green
 - [ ] R8: Phase H — 41-file documentation audit
