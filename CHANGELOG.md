@@ -3,6 +3,18 @@
 All notable changes to zwasm are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.3.0] - 2026-03-02
+
+### Added
+- Module cache for predecoded IR (Phase 1.2): reuse compiled module state across invocations
+- Cache-enabled benchmark variants for all bench scripts (`--cache` flag)
+
+### Changed
+- Benchmark suite expanded with cached variants for real-world programs
+- CI: pinned wasmtime version to avoid broken install script on macOS
+- Release process: migrated Ubuntu testing from SSH to OrbStack
+- Project docs reorganized for post-v1.2.0 phase planning
+
 ## [1.2.0] - 2026-02-27
 
 ### Added
