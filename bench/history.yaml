@@ -2314,3 +2314,38 @@ entries:
       rw_c_string: {time_ms: 49.2}
       rw_cpp_string: {time_ms: 12.3}
       rw_cpp_sort: {time_ms: 8.4}
+  - id: "phase1-cache"
+    date: "2026-03-02"
+    reason: "Phase 1: guard pages + module cache (v1.3.0 candidate)"
+    commit: "4de317d"
+    build: ReleaseSafe
+    results:
+      fib: {time_ms: 50.8}
+      tak: {time_ms: 7.8}
+      sieve: {time_ms: 4.0}
+      nbody: {time_ms: 22.0}
+      nqueens: {time_ms: 2.1}
+      tgo_fib: {time_ms: 35.8}
+      tgo_tak: {time_ms: 7.9}
+      tgo_arith: {time_ms: 2.2}
+      tgo_sieve: {time_ms: 3.2}
+      tgo_fib_loop: {time_ms: 2.1}
+      tgo_gcd: {time_ms: 2.1}
+      tgo_nqueens: {time_ms: 43.4}
+      tgo_mfr: {time_ms: 48.1}
+      tgo_list: {time_ms: 37.1}
+      tgo_rwork: {time_ms: 9.3}
+      tgo_strops: {time_ms: 33.1}
+      st_fib2: {time_ms: 919.7}
+      st_sieve: {time_ms: 183.8}
+      st_nestedloop: {time_ms: 3.7}
+      st_ackermann: {time_ms: 6.5}
+      st_matrix: {time_ms: 295.7}
+      gc_alloc: {time_ms: 8.0}
+      gc_tree: {time_ms: 29.9}
+      rw_rust_fib: {time_ms: 36.8}
+      rw_c_matrix: {time_ms: 22.0}
+      rw_c_math: {time_ms: 61.6}
+      rw_c_string: {time_ms: 48.1}
+      rw_cpp_string: {time_ms: 8.0}
+      rw_cpp_sort: {time_ms: 5.4}
