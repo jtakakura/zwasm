@@ -71,7 +71,8 @@ pub const WasmFunction = struct {
 const vm_mod = @import("vm.zig");
 const predecode_mod = @import("predecode.zig");
 const regalloc_mod = @import("regalloc.zig");
-const jit_mod = @import("jit.zig");
+const build_options = @import("build_options");
+const jit_mod = if (build_options.enable_jit) @import("jit.zig") else vm_mod.jit_mod;
 
 /// Host function callback signature.
 /// Takes a pointer to the VM and a context value.

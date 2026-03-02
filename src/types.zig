@@ -9,10 +9,15 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const wit_parser = @import("wit_parser.zig");
-const wit = @import("wit.zig");
-const component = @import("component.zig");
-const canon_abi = @import("canon_abi.zig");
+const build_options = @import("build_options");
+const wit_parser = if (build_options.enable_component) @import("wit_parser.zig") else struct {
+    pub const WitFunc = struct { name: []const u8, params: ?[]const WitParam, result: ?WitType };
+    pub const WitParam = struct {};
+    pub const WitType = struct {};
+};
+const wit = if (build_options.enable_component) @import("wit.zig") else struct {};
+const component = if (build_options.enable_component) @import("component.zig") else struct {};
+const canon_abi = if (build_options.enable_component) @import("canon_abi.zig") else struct {};
 
 // Internal Wasm runtime modules
 const rt = struct {

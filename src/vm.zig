@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const build_options = @import("build_options");
 const mem = std.mem;
 const math = std.math;
 const Allocator = mem.Allocator;
@@ -28,7 +29,24 @@ const predecode_mod = @import("predecode.zig");
 const PreInstr = predecode_mod.PreInstr;
 const regalloc_mod = @import("regalloc.zig");
 const RegInstr = regalloc_mod.RegInstr;
-pub const jit_mod = @import("jit.zig");
+pub const jit_mod = if (build_options.enable_jit) @import("jit.zig") else struct {
+    pub const JitFn = *const fn ([*]u64, *anyopaque, *anyopaque) callconv(.c) u64;
+    pub const JitCode = struct {
+        buf: []align(std.heap.page_size_min) u8 = &.{},
+        entry: JitFn = undefined,
+        code_len: u32 = 0,
+        oob_exit_offset: u32 = 0,
+        osr_entry: ?JitFn = null,
+        pub fn deinit(_: *JitCode, _: Allocator) void {}
+    };
+    pub fn jitSupported() bool { return false; }
+    pub const HOT_THRESHOLD: u32 = 0;
+    pub const BACK_EDGE_THRESHOLD: u32 = 0;
+    pub const MAX_JIT_IR_INSTRS: u32 = 0;
+    pub fn getMinMemoryBytes(_: anytype) u32 { return 0; }
+    pub fn getUseGuardPages(_: anytype) bool { return false; }
+    pub fn compileFunction(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) ?*JitCode { return null; }
+};
 const guard_mod = @import("guard.zig");
 pub const trace_mod = @import("trace.zig");
 
@@ -7505,7 +7523,7 @@ test "Profile — fib(10) opcode counting" {
 }
 
 test "Tiered — back-edge counting triggers JIT for single-call loop function" {
-    if (builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    if (!build_options.enable_jit or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
 
     // sieve(100) is called once but has a hot inner loop.
     // Back-edge counting should trigger JIT mid-execution and restart via JIT.
@@ -7564,7 +7582,7 @@ test "Tiered — back-edge counting triggers JIT for single-call loop function" 
 }
 
 test "Tiered — JIT-to-JIT fast path for recursive calls" {
-    if (builtin.cpu.arch != .aarch64) return error.SkipZigTest;
+    if (!build_options.enable_jit or builtin.cpu.arch != .aarch64) return error.SkipZigTest;
 
     // fib(20) = 6765, involves ~21891 recursive calls.
     // With HOT_THRESHOLD=10, JIT kicks in early. The fast JIT-to-JIT path
