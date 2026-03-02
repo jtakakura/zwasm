@@ -41,14 +41,18 @@ The commit gate records automatically — no need to pre-run at session start.
 ## Commands
 
 ```bash
-# Quick check (no recording)
+# Quick check (uncached + cached variants)
 bash bench/run_bench.sh --quick
+# Quick check (uncached only)
+bash bench/run_bench.sh --quick --no-cache
 # Cross-runtime quick check
 bash bench/compare_runtimes.sh --quick
 # Specific benchmark only
 bash bench/run_bench.sh --bench=fib
 # Record to history (hyperfine 5 runs + 3 warmup)
 bash bench/record.sh --id="3.9" --reason="JIT function-level"
+# Record without cached variants
+bash bench/record.sh --id="3.9" --reason="..." --no-cache
 ```
 
 ## Before Committing Optimization/JIT Changes

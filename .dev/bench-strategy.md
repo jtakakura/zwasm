@@ -120,6 +120,40 @@ wasm-tools parse bench/wat/gc_tree.wat -o bench/wasm/gc_tree.wasm
 - Node v22+ supports WasmGC natively
 - Large performance gap expected: interpreter vs JIT for allocation-heavy workloads
 
+## Cached Benchmarks
+
+All benchmark scripts support `--cache` variants that measure predecoded IR cache
+(`zwasm run --cache`) and Cranelift cache (`wasmtime -C cache`) side-by-side.
+
+### How it works
+
+1. **Pre-compile phase**: Before cached runs, `zwasm compile` pre-populates
+   `~/.cache/zwasm/` for all benchmark wasm files (clean slate each run)
+2. **wasmtime**: Uses `-C cache` (lazy caching) — hyperfine warmup populates it
+3. **bun/node**: Skip cached variants (V8 JIT cache not controllable via CLI)
+
+### Usage
+
+```bash
+bash bench/run_bench.sh --quick                  # uncached + cached
+bash bench/run_bench.sh --quick --no-cache       # uncached only (backward compatible)
+bash bench/compare_runtimes.sh --bench=fib       # zwasm, zwasm_cached, wasmtime, wasmtime_cached
+bash bench/record.sh --id=X --reason="..." --no-cache  # record without cached variants
+```
+
+### Naming convention
+
+- `fib` — uncached (default, no cache flag)
+- `fib_cached` — with `--cache` / `-C cache`
+- In history.yaml: interleaved `fib: {time_ms: X}` / `fib_cached: {time_ms: Y}`
+
+### Interpretation
+
+Cache benefit depends on module complexity vs execution time:
+- **Large modules** (tgo_nqueens): significant savings (-44%, predecode dominates startup)
+- **Compute-heavy** (st_fib2, rw_*): minimal change (predecode tiny vs execution)
+- **Small WAT modules** (nqueens, sieve): may show overhead (cache I/O ≈ predecode)
+
 ## Cross-Runtime Comparison
 
 Compare zwasm against other Wasm runtimes.
@@ -128,6 +162,7 @@ Compare zwasm against other Wasm runtimes.
 bash bench/compare_runtimes.sh                                         # zwasm vs wasmtime
 bash bench/compare_runtimes.sh --rt=zwasm,wasmtime,bun,node            # all 4
 bash bench/compare_runtimes.sh --bench=st_fib2 --quick                 # quick single
+bash bench/compare_runtimes.sh --no-cache                              # skip cached variants
 bash bench/compare_runtimes.sh -h                                      # list all benchmarks
 ```
 
@@ -156,10 +191,12 @@ Track performance progression across optimization tasks.
 bash bench/record.sh --id="3.8" --reason="ARM64 JIT basic"
 bash bench/record.sh --id="3.8" --reason="re-measure" --overwrite
 bash bench/record.sh --bench=fib --id="3.8" --reason="fib only"
+bash bench/record.sh --no-cache --id="3.8" --reason="uncached only"
 bash bench/record.sh --delete="3.8"
 ```
 
 Results: `bench/history.yaml` — zwasm-only, hyperfine mean ms.
+Includes both `name: {time_ms: X}` and `name_cached: {time_ms: Y}` entries (unless `--no-cache`).
 
 ## Cross-Runtime Recording
 
@@ -168,9 +205,11 @@ Record speed, memory, and binary size across runtimes.
 ```bash
 bash bench/record_comparison.sh                              # all runtimes
 bash bench/record_comparison.sh --rt=zwasm,wasmtime          # specific
+bash bench/record_comparison.sh --no-cache                   # skip cached variants
 ```
 
 Results: `bench/runtime_comparison.yaml`
+Includes `zwasm_cached` and `wasmtime_cached` entries per benchmark (unless `--no-cache`).
 
 ## Known Issues
 

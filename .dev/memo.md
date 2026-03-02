@@ -13,15 +13,19 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-Phase 1 merged to main. Next: v1.3.0 release, then Phase 3.
+Branch `bench/cache-variants`: Added cached benchmark variants to all 5 bench scripts.
+Recorded `phase1-cached` in history.yaml (58 benchmarks: 29 uncached + 29 cached).
+Recorded runtime_comparison.yaml with zwasm_cached + wasmtime_cached entries.
 
-Merge Gate passed (Mac + Ubuntu): spec 62,263, E2E 792/792, real-world 30/30.
+**Done on this branch**:
+- run_bench.sh, record.sh, compare_runtimes.sh, record_comparison.sh, ci_compare.sh
+- All support `--no-cache` for backward compatibility
+- bench-strategy.md updated with Cached Benchmarks section
 
 **Next steps**:
-1. Tag v1.3.0 + update CW dependency (use `/release` skill)
-2. Phase 3: CI Automation + Documentation (see `roadmap.md`)
-
-Previous: Phase 1 (guard pages + module cache) merged to main.
+1. Merge bench/cache-variants to main
+2. Tag v1.3.0 + update CW dependency (use `/release` skill)
+3. Phase 3: CI Automation + Documentation (see `roadmap.md`)
 
 ## Known Bugs
 
