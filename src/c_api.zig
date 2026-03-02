@@ -142,6 +142,41 @@ export fn zwasm_module_validate(wasm_ptr: [*]const u8, len: usize) bool {
     return true;
 }
 
+// ============================================================
+// Function invocation
+// ============================================================
+
+/// Invoke an exported function by name.
+/// Args and results are passed as uint64_t arrays. Returns false on error.
+export fn zwasm_module_invoke(
+    module: *zwasm_module_t,
+    name_ptr: [*:0]const u8,
+    args: ?[*]u64,
+    nargs: u32,
+    results: ?[*]u64,
+    nresults: u32,
+) bool {
+    clearError();
+    const name = std.mem.sliceTo(name_ptr, 0);
+    const args_slice = if (args) |a| a[0..nargs] else &[_]u64{};
+    const results_slice = if (results) |r| r[0..nresults] else &[_]u64{};
+    module.module.invoke(name, args_slice, results_slice) catch |err| {
+        setError(err);
+        return false;
+    };
+    return true;
+}
+
+/// Invoke the _start function (WASI entry point). Returns false on error.
+export fn zwasm_module_invoke_start(module: *zwasm_module_t) bool {
+    clearError();
+    module.module.invoke("_start", &[_]u64{}, &[_]u64{}) catch |err| {
+        setError(err);
+        return false;
+    };
+    return true;
+}
+
 /// Return the last error message as a null-terminated C string.
 /// Returns an empty string if no error has occurred.
 /// The pointer is valid until the next C API call on the same thread.
@@ -190,6 +225,31 @@ test "c_api: module_validate with valid wasm" {
 test "c_api: module_validate with invalid bytes" {
     const bad = &[_]u8{ 0x00, 0x00, 0x00, 0x00 };
     try testing.expect(!zwasm_module_validate(bad.ptr, bad.len));
+    const msg = zwasm_last_error_message();
+    try testing.expect(msg[0] != 0);
+}
+
+// Module with exported function "f" returning i32 42: () -> i32
+const RETURN42_WASM = "\x00\x61\x73\x6d\x01\x00\x00\x00" ++
+    "\x01\x05\x01\x60\x00\x01\x7f" ++ // type: () -> i32
+    "\x03\x02\x01\x00" ++ // func section
+    "\x07\x05\x01\x01\x66\x00\x00" ++ // export "f" = func 0
+    "\x0a\x06\x01\x04\x00\x41\x2a\x0b"; // code: i32.const 42, end
+
+test "c_api: invoke exported function" {
+    const module = zwasm_module_new(RETURN42_WASM.ptr, RETURN42_WASM.len).?;
+    defer zwasm_module_delete(module);
+
+    var results = [_]u64{0};
+    try testing.expect(zwasm_module_invoke(module, "f", null, 0, &results, 1));
+    try testing.expectEqual(@as(u64, 42), results[0]);
+}
+
+test "c_api: invoke nonexistent function returns false" {
+    const module = zwasm_module_new(RETURN42_WASM.ptr, RETURN42_WASM.len).?;
+    defer zwasm_module_delete(module);
+
+    try testing.expect(!zwasm_module_invoke(module, "nonexistent", null, 0, null, 0));
     const msg = zwasm_last_error_message();
     try testing.expect(msg[0] != 0);
 }
