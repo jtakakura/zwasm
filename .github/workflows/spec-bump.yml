@@ -69,7 +69,12 @@ jobs:
           BRANCH="auto/spec-bump-${NEW_SHA}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Save spec-sha, reset working tree, then commit only spec-sha
+          SPEC_SHA=$(cat .github/spec-sha)
+          git checkout -- .
+          git clean -fd
           git checkout -b "$BRANCH"
+          echo "$SPEC_SHA" > .github/spec-sha
           git add .github/spec-sha
           git commit -m "Bump spec testsuite to ${NEW_SHA}"
           git push --force-with-lease origin "$BRANCH"
