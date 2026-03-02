@@ -20,23 +20,15 @@ Stages 0-46 complete. Details: `roadmap-archive.md`.
 Integrated roadmap (zwasm + CW): `private/future/03_zwasm_clojurewasm_roadmap_ja.md`
 CW-specific phases (2, 4, 6, 7, 9, 14, 16, 17) are in that document only.
 
-### Phase 1: Guard Pages + Module Cache (3 days)
+### Phase 1: Guard Pages + Module Cache (1 day remaining)
 
 Performance impact: highest of remaining items. Improvements propagate to CW.
 
-**1.1 Virtual Memory Guard Pages (2 days)**
+**1.1 Virtual Memory Guard Pages — COMPLETE**
 
-Eliminate explicit bounds check on every memory load/store.
-8GB virtual address reservation → `mprotect` → trap SIGSEGV as Wasm trap.
-
-- D## decision record (D123)
-- `memory.zig`: mmap(8GB) + mprotect approach
-- `jit.zig` / `x86.zig`: skip bounds check 2-instruction sequence when guard pages active
-- `vm.zig`: interpreter fast path
-- 32-bit fallback maintained
-- Benchmark: st_matrix, shootout programs
-
-Expected: 1.5-2x speedup on memory-intensive benchmarks.
+Already implemented: guard.zig (mmap/mprotect/signal handler), memory.zig (initGuarded),
+store.zig (auto-use when JIT supported), jit.zig/x86.zig (bounds check elimination),
+cli.zig (signal handler install).
 
 **1.2 Module Cache / AOT Serialize (1 day)**
 
