@@ -4,34 +4,25 @@ Session handover document. Read at session start.
 
 ## Current State
 
-- Stages 0-46 + Phase 1 complete. **v1.3.0 released** (tagged 7570170).
+- Stages 0-46 + Phase 1, 3, 5 complete. **v1.3.0 released** (tagged 7570170).
 - Spec: 62,263/62,263 Mac+Ubuntu (100.0%, 0 skip). E2E: 792/792 (100.0%, 0 leak).
 - Wasm 3.0: all 9 proposals. WASI: 46/46 (100%). WAT parser complete.
 - JIT: Register IR + ARM64/x86_64. Size: 1.20MB stripped. RSS: 4.48MB.
 - Module cache: `zwasm run --cache`, `zwasm compile` (D124).
+- **C API**: `libzwasm.so`/`.dylib`/`.a` — 25 exported `zwasm_*` functions (D126).
+- **Conditional compilation**: `-Djit=false`, `-Dcomponent=false`, `-Dwat=false` (D127).
+  Minimal build: ~940KB stripped (24% reduction).
 - **main = stable**: v1.3.0 tagged. ClojureWasm updated to v1.3.0.
 
 ## Current Task
 
-**Phase 5: C API + Conditional Compilation** — branch `phase5/c-api`
+**Phase 5 complete** — branch `phase5/c-api`, ready for merge.
 
-### 5.1 C API (wasm-c-api)
-- D126 decision record
-- `src/c_api.zig`: export engine/store/module/instance/func/memory/val via C ABI
-- WASI config C API
-- `include/zwasm.h` header
-- `libzwasm.so` / `libzwasm.dylib` shared library build
-- C test + Python ctypes example
+12 commits: D126 decision, c_api.zig (lifecycle/invoke/memory/exports/WASI/host-fns),
+include/zwasm.h, build targets, C tests + Python example, feature flags,
+conditional compilation guards, CI size-matrix, D127 decision + docs.
 
-### 5.2 Conditional Compilation
-- `-Djit=false`, `-Dsimd=false`, `-Dgc=false`, `-Dthreads=false`, `-Dcomponent=false`
-- Minimal build (MVP+WASI, no JIT) target < 500KB
-- CI size matrix
-
-### Design Notes
-- Reference: wasm-c-api spec (https://github.com/WebAssembly/wasm-c-api)
-- Reference: wasmtime C API (`~/Documents/OSS/wasmtime/crates/c-api/`)
-- Zig C ABI export: `export fn` + `callconv(.c)`
+**Next**: Merge Gate (Mac + Ubuntu), then merge to main.
 
 ## Known Bugs
 

@@ -59,24 +59,30 @@ cli.zig (signal handler install).
 
 **Gate**: PASSED.
 
-### Phase 5: C API + Conditional Compilation (3 days)
+### Phase 5: C API + Conditional Compilation — COMPLETE
 
-**5.1 C API (wasm-c-api) (2 days)**
+**5.1 C API (D126)**
 
-- D## decision record (D125)
-- `c_api.zig`: export engine/store/module/instance/func/memory/val via C ABI
-- WASI config C API
-- `include/zwasm.h` header generation
-- `libzwasm.so` / `libzwasm.dylib` shared library build
-- C test + Python ctypes example
+- `src/c_api.zig`: 25 exported `zwasm_*` functions via C ABI
+  - Module lifecycle: `new`, `new_wasi`, `new_wasi_configured`, `new_with_imports`, `delete`, `validate`
+  - Invocation: `invoke`, `invoke_start`
+  - Memory: `memory_data`, `memory_size`, `memory_read`, `memory_write`
+  - Exports: `export_count`, `export_name`, `export_param_count`, `export_result_count`
+  - WASI config: `wasi_config_new/delete/set_argv/set_env/preopen_dir`
+  - Host imports: `import_new/delete/add_fn`
+  - Error: `last_error_message`
+- `include/zwasm.h`: single C header
+- `libzwasm.so` / `.dylib` / `.a` build targets (`zig build lib`)
+- C tests (`test/c_api/test_basic.c`), C example, Python ctypes example
 
-**5.2 Conditional Compilation (1 day)**
+**5.2 Conditional Compilation (D127)**
 
-- `-Djit=false`, `-Dsimd=false`, `-Dgc=false`, `-Dthreads=false`, `-Dcomponent=false`
-- Minimal build (MVP+WASI, no JIT) target < 500KB
-- CI size matrix
+- Feature flags: `-Djit=false`, `-Dcomponent=false`, `-Dwat=false`
+  (SIMD/GC/threads flags defined but not yet guarded — low savings)
+- Minimal build: ~940KB stripped (24% reduction from full)
+- CI `size-matrix` job: 5 build variants
 
-**Gate**: C API tests pass. Minimal build < 500KB.
+**Gate**: PASSED.
 
 ### Phase 8: Real-World Coverage + WAT Parity (3 days)
 

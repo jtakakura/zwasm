@@ -270,3 +270,42 @@ layer can be added on top later. Rationale:
 for ecosystem compatibility (e.g., wasm-c-api test suite).
 
 Affected files: `src/c_api.zig`, `include/zwasm.h`, `build.zig`
+
+## D127: Conditional Compilation Design
+
+**Context**: zwasm compiles all features by default (~1.23MB stripped). Embedded
+use cases may only need MVP+WASI without JIT or component model.
+
+**Decision**: Feature flags via `build.zig` options, checked at comptime.
+
+**Flags implemented**:
+- `-Djit=false` — excludes jit.zig/x86.zig/arm64.zig (interpreter only)
+- `-Dcomponent=false` — excludes component.zig/canon_abi.zig/wit_parser.zig/wit.zig
+- `-Dwat=false` — excludes WAT text format parser (existing)
+- `-Dsimd=false`, `-Dgc=false`, `-Dthreads=false` — build options defined but
+  not yet guarded in source (low binary savings, high complexity)
+
+**Guarding pattern**: Conditional import with comptime stub struct:
+```zig
+const jit_mod = if (build_options.enable_jit) @import("jit.zig") else struct {
+    pub fn jitSupported() bool { return false; }
+    // ... stub types matching real API surface
+};
+```
+Zig's comptime dead code elimination removes unreachable branches automatically.
+
+**Why only JIT and component?** JIT (~200KB savings) and component model (~80KB)
+are the largest optional modules. SIMD/GC/threads opcodes are interleaved
+throughout vm.zig dispatch and would require extensive per-opcode guards for
+minimal savings. Pragmatic choice: guard the big modules, leave fine-grained
+opcodes always compiled.
+
+**Size results** (stripped, ReleaseSafe, Ubuntu x86_64):
+- full: ~1230 KB
+- no-jit: ~1050 KB
+- no-component: ~1140 KB
+- no-wat: ~1140 KB
+- minimal (no-jit + no-component + no-wat): ~940 KB
+
+Affected files: `build.zig`, `src/vm.zig`, `src/store.zig`, `src/types.zig`,
+`.github/workflows/ci.yml`
