@@ -51,7 +51,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           WEEK=$(date -u +%Y-W%V)
-          EXISTING=$(gh issue list --label "spectec" --state open --search "SpecTec $WEEK" --json number --jq '.[0].number' 2>/dev/null || echo "")
+          EXISTING=$(gh issue list --label "spectec" --state all --search "SpecTec $WEEK" --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -n "$EXISTING" ]; then
             echo "Issue already exists: #$EXISTING"
             echo "exists=true" >> "$GITHUB_OUTPUT"
