@@ -32,22 +32,32 @@ Before starting, verify:
    - Binary (ReleaseSafe, stripped): ≤ 1.5 MB
    - Memory (sieve benchmark): ≤ 4.5 MB RSS
 
-## Phase 2: zwasm Verification (Ubuntu x86_64 via SSH)
+## Phase 2: zwasm Verification (Ubuntu x86_64 via OrbStack)
 
-See `.dev/ubuntu-x86_64.md` for SSH connection and command patterns (`nix develop`).
+See `.dev/references/ubuntu-testing-guide.md` for commands. Setup: `.dev/references/setup-orbstack.md`.
 
-1. Push `main` to remote: `git push origin main`
-2. SSH pull: `ssh ubuntu 'bash -l -c "cd ~/zwasm && git pull --ff-only"'`
-3. Unit tests: `zig build test` — all pass, 0 fail, 0 leak
-4. Spec tests: `python3 test/spec/run_spec.py --build --summary` — fail=0, skip=0
-5. E2E tests: `bash test/e2e/run_e2e.sh --convert --summary` — fail=0, leak=0
-6. Real-world compat: `bash test/realworld/run_compat.sh` — PASS=30, FAIL=0, CRASH=0
-   (needs `build_all.sh` first; requires WASI SDK + Rust wasm32-wasip1 + Go/TinyGo)
-7. Benchmarks: `bash bench/run_bench.sh` — no extreme regression
+1. Rsync project to VM-local storage:
+   ```bash
+   orb run -m my-ubuntu-amd64 bash -lc "
+     rsync -a --delete \
+       --exclude='.zig-cache' --exclude='zig-out' \
+       '/Users/shota.508/Documents/MyProducts/zwasm/' ~/zwasm/
+   "
+   ```
+2. Unit tests: `orb run -m my-ubuntu-amd64 bash -lc "cd ~/zwasm && zig build test"` — all pass, 0 fail, 0 leak
+3. Spec tests: `orb run -m my-ubuntu-amd64 bash -lc "cd ~/zwasm && python3 test/spec/run_spec.py --build --summary"` — fail=0, skip=0
+4. E2E tests: `orb run -m my-ubuntu-amd64 bash -lc "cd ~/zwasm && bash test/e2e/run_e2e.sh --convert --summary"` — fail=0, leak=0
+5. Real-world compat:
+   ```bash
+   orb run -m my-ubuntu-amd64 bash -lc "cd ~/zwasm && export WASI_SDK_PATH=/opt/wasi-sdk && bash test/realworld/build_all.sh"
+   orb run -m my-ubuntu-amd64 bash -lc "cd ~/zwasm && bash test/realworld/run_compat.sh --verbose"
+   ```
+   PASS=30, FAIL=0, CRASH=0 (needs `build_all.sh` first; requires WASI SDK + Rust wasm32-wasip1)
+6. Benchmarks: `orb run -m my-ubuntu-amd64 bash -lc "cd ~/zwasm && bash bench/run_bench.sh --quick"` — no extreme regression
 
 If Ubuntu reveals failures not seen on Mac, **fix the root cause** before proceeding.
 
-**Note**: Ubuntu SSH output is slow/buffered. Launch commands in background, do other work, check periodically. Never block waiting.
+**Note**: OrbStack output can be slow/buffered. Launch long commands in background, do other work, check periodically.
 
 ## Phase 3: ClojureWasm Verification (relative path build)
 
@@ -72,7 +82,7 @@ If Ubuntu reveals failures not seen on Mac, **fix the root cause** before procee
    ```
    .version = "1.2.0",  // was "1.1.0"
    ```
-2. **CHANGELOG**: Rename `[Unreleased]` section to `[1.2.0] - YYYY-MM-DD`
+2. **CHANGELOG**: Add new version section `[X.Y.Z] - YYYY-MM-DD` at the top (if `[Unreleased]` section exists, rename it; otherwise create the section from git log since last tag)
 3. **Commit**: `git commit -am "Release v1.2.0"`
 4. **Record benchmark**: `bash bench/record.sh --id=v1.2.0 --reason="Release v1.2.0"`
 5. **Commit benchmark**: `git add bench/history.yaml && git commit -m "Record benchmark for v1.2.0"`
@@ -103,7 +113,7 @@ If Ubuntu reveals failures not seen on Mac, **fix the root cause** before procee
 | Phase | Gate | Pass criteria |
 |-------|------|---------------|
 | 1 | Mac local | unit(0 fail/leak) + spec(0 fail/skip) + E2E(0 fail/leak) + compat(30/0/0) + bench + size(≤1.5MB/≤4.5MB) |
-| 2 | Ubuntu SSH | unit(0 fail/leak) + spec(0 fail/skip) + E2E(0 fail/leak) + compat(30/0/0) + bench |
+| 2 | Ubuntu OrbStack | unit(0 fail/leak) + spec(0 fail/skip) + E2E(0 fail/leak) + compat(30/0/0) + bench |
 | 3 | CW local | CW unit + e2e + portability (local zwasm path) |
 | 4 | zwasm tag | version bump + CHANGELOG + tag + push + CI green |
 | 5 | CW tag | URL+hash update + CW tests pass + push |
@@ -112,7 +122,8 @@ If Ubuntu reveals failures not seen on Mac, **fix the root cause** before procee
 
 - **Always test real-world compat** (`run_compat.sh`). JIT bugs (OSR, back-edge, register order) only surface with real compiler output (Go, C++, Rust), not hand-written WAT.
 - **Ubuntu x86_64 can differ from Mac ARM64**. The x86 JIT has its own codegen bugs (select aliasing, OSR prologue register order, division edge cases). Always verify both platforms.
-- **wasm files are gitignored**. Ubuntu needs `build_all.sh` with WASI SDK + Rust wasm32-wasip1 target + Go/TinyGo installed. CI installs these automatically but SSH environment requires manual setup.
+- **wasm files are gitignored**. Ubuntu VM needs `build_all.sh` with WASI SDK + Rust wasm32-wasip1 target installed. CI installs these automatically but OrbStack VM requires manual setup (see `.dev/references/setup-orbstack.md`).
+- **OrbStack sync**: Always rsync to VM-local storage (`~/zwasm/`) before testing. Building directly from Mac FS (`/Users/...`) is slow. Exclude `.zig-cache` and `zig-out`.
 - **CI runs on tag push too**. The `release.yml` workflow triggers on `v*` tags. Don't tag until you're confident — the Release is created automatically.
 - **CW hash discovery**: `zig build` with a wrong `.hash` prints the correct hash in the error message. Copy-paste it.
 - **Strip before size check on Linux**. Linux ELF includes DWARF inline (~6.79 MB raw vs ~1.18 MB stripped). CI strips automatically.
