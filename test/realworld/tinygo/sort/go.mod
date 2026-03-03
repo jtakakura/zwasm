@@ -1,3 +1,3 @@
-module sort_test
+module tinygo_sort
 
-go 1.25.5
+go 1.22
