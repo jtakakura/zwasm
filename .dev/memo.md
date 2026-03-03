@@ -33,12 +33,17 @@ Session handover document. Read at session start.
 - 708 conv-fail = wasm-tools can't convert malformed .wasm (expected)
 - No WAT parser fixes needed
 
+### W30 JIT Bug Fix (Phase 8 pre-merge)
+- Guard page recovery: save/restore across nested JIT calls (SIGBUS fix)
+- instrDefinesRd: global.set/memory.fill/memory.copy rd is USE not DEF
+- computeCalleeSavedLiveSet: added rd-as-USE + select condition vreg
+- Mac: 50/50 PASS, 0 CRASH. Spec 62,263/62,263. E2E 792/792.
+
 **Next**: Merge Gate (Mac + Ubuntu), then merge to main + update compat count.
 
 ## Known Bugs
 
-- W30: JIT out-of-bounds on complex programs (regex-lite, SQLite, TinyGo heavy dispatch).
-  Works in interpreter mode. Tracked in checklist.md.
+- None active (W30 resolved).
 
 ## References
 

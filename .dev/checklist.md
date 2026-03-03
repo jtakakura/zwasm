@@ -11,11 +11,12 @@ Prefix: W## (to distinguish from CW's F## items).
 
 ## Open items
 
-- [ ] W30: JIT out-of-bounds on complex real-world programs
-  ARM64 (Mac): regex-lite crate, SQLite. 50/50 compat PASS (programs adapted).
-  x86_64 (Ubuntu): go_regex, rust_serde_json, tinygo_hello/json/sort (5 DIFF).
-  Works in interpreter mode. Likely register allocation or spill/reload under
-  heavy call-indirect / interface dispatch. Original 30 programs unaffected.
+- [x] W30: JIT out-of-bounds on complex real-world programs — **FIXED**
+  Root cause: three JIT codegen bugs:
+  1. Guard page recovery not saved/restored across nested JIT calls (SIGBUS crashes)
+  2. instrDefinesRd wrong for global.set/memory.fill/memory.copy (rd is USE not DEF)
+  3. computeCalleeSavedLiveSet missing rd-as-USE and select condition vreg
+  Mac: 50/50 PASS, 0 CRASH. Ubuntu: pending merge gate verification.
 
 ## Resolved items (summary, details in git history)
 

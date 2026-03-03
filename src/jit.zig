@@ -1441,6 +1441,10 @@ pub const Compiler = struct {
             // Memory stores use rd as VALUE source, not a definition
             0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E,
             => false,
+            // global.set: rd = value to write (a use, not a definition)
+            0x24 => false,
+            // memory.fill/copy: rd = destination address (a use, not a definition)
+            regalloc_mod.OP_MEMORY_FILL, regalloc_mod.OP_MEMORY_COPY => false,
             // GC struct.set: rd = ref_reg (a use, not a definition)
             predecode_mod.GC_BASE | 0x05 => false,
             else => true,
@@ -1540,17 +1544,31 @@ pub const Compiler = struct {
                 continue;
             }
 
-            if (instr.op != regalloc_mod.OP_CALL) {
+            if (instr.op != regalloc_mod.OP_CALL and
+                instr.op != (predecode_mod.GC_BASE | 0x00))
+            {
                 self.markCalleeSavedUse(&live, &resolved, instr.rs1);
             }
             if (instrHasRs2(instr)) {
                 self.markCalleeSavedUse(&live, &resolved, instr.rs2());
+            }
+            // select: condition register stored in operand
+            if (instr.op == 0x1B) {
+                const cond_vreg: u16 = @truncate(instr.operand);
+                self.markCalleeSavedUse(&live, &resolved, cond_vreg);
             }
 
             if (instrDefinesRd(instr)) {
                 if (self.isCalleeSavedVreg(instr.rd)) {
                     resolved |= @as(u32, 1) << @as(u5, @intCast(instr.rd));
                 }
+            } else if (instr.op != regalloc_mod.OP_NOP and
+                instr.op != regalloc_mod.OP_DELETED and
+                instr.op != regalloc_mod.OP_BLOCK_END and
+                instr.op != regalloc_mod.OP_BR)
+            {
+                // rd is a USE (not a define) for: return, stores, br_if, br_table, global.set
+                self.markCalleeSavedUse(&live, &resolved, instr.rd);
             }
 
             // Backward branches: conservatively mark unresolved callee-saved vregs as live
@@ -4816,7 +4834,24 @@ pub fn jitCallTrampoline(
                 for (call_args[0..n_args], 0..) |arg, i| callee_regs[i] = arg;
                 for (n_args..reg.local_count) |i| callee_regs[i] = 0;
 
+                // Save/restore guard page recovery: callee's recovery must not
+                // clobber caller's — otherwise caller crashes on guard page faults
+                // after this trampoline returns.
+                const guard_mod = @import("guard.zig");
+                const saved_recovery = guard_mod.getRecovery().*;
+                if (jc.oob_exit_offset != 0) {
+                    const buf_start = @intFromPtr(jc.buf.ptr);
+                    guard_mod.setRecovery(.{
+                        .oob_exit_pc = buf_start + jc.oob_exit_offset,
+                        .jit_code_start = buf_start,
+                        .jit_code_end = buf_start + jc.code_len,
+                        .active = true,
+                    });
+                }
+
                 const err = jc.entry(callee_regs.ptr, vm_opaque, instance_opaque);
+
+                guard_mod.setRecovery(saved_recovery);
                 vm.reg_ptr = base;
                 vm.call_depth -= 1;
                 if (err != 0) return err;
@@ -4899,7 +4934,22 @@ pub fn jitCallIndirectTrampoline(
                 for (call_args[0..n_args], 0..) |arg, i| callee_regs[i] = arg;
                 for (n_args..reg.local_count) |i| callee_regs[i] = 0;
 
+                // Save/restore guard page recovery for nested JIT calls
+                const guard_mod = @import("guard.zig");
+                const saved_recovery = guard_mod.getRecovery().*;
+                if (jc.oob_exit_offset != 0) {
+                    const buf_start = @intFromPtr(jc.buf.ptr);
+                    guard_mod.setRecovery(.{
+                        .oob_exit_pc = buf_start + jc.oob_exit_offset,
+                        .jit_code_start = buf_start,
+                        .jit_code_end = buf_start + jc.code_len,
+                        .active = true,
+                    });
+                }
+
                 const err = jc.entry(callee_regs.ptr, vm_opaque, instance_opaque);
+
+                guard_mod.setRecovery(saved_recovery);
                 vm.reg_ptr = base;
                 if (err != 0) return err;
 
