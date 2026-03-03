@@ -18,8 +18,10 @@ Prefix: W## (to distinguish from CW's F## items).
   3. computeCalleeSavedLiveSet missing rd-as-USE and select condition vreg
   4. x86 emitCall: liveness-aware spill/reload left garbage in physical registers
   Mac + Ubuntu: spec 62,263/62,263, E2E 792/792, compat 50/50 (Ubuntu).
-- [ ] W31: Intermittent ARM64 JIT crash in Go wasm programs (go_regex, go_crypto_sha256)
-  Pre-existing on main. Programs sometimes produce empty stdout. Low priority.
+- [x] W31: Intermittent ARM64 JIT crash in Go wasm programs — **NOT A BUG**
+  Root cause: go_crypto_sha256 test had wrong expected SHA-256 hash values.
+  Fix: corrected expected hash for "Hello, SHA-256!" in main.go.
+  50/50 PASS (go_crypto_sha256 + go_regex) after fix. No JIT bug.
 
 ## Resolved items (summary, details in git history)
 

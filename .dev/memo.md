@@ -42,15 +42,10 @@ Session handover document. Read at session start.
   spillCallerSaved wrote garbage to register file)
 - ARM64 spillCallerSavedLive: reverted "spill ALL" back to "spill live only"
   (the "spill ALL" caused intermittent failures in Go programs)
-- Mac: 50/50* PASS (2 intermittent Go programs — pre-existing on main)
+- Mac: 50/50 PASS (W31 resolved — bad test data, not JIT bug)
 - Ubuntu: 50/50 PASS, 0 CRASH. Spec 62,263/62,263. E2E 792/792.
 
 **Next**: Merge Gate (Mac + Ubuntu), then merge to main + update compat count.
-
-## Known Bugs
-
-- Intermittent ARM64 JIT: go_regex, go_crypto_sha256 sometimes produce
-  empty stdout (pre-existing on main branch, not a regression).
 
 ## References
 
