@@ -208,6 +208,17 @@ jobs:
         with:
           version: 0.15.2
 
+      - name: Cache Zig build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            .zig-cache
+            zig-cache
+            ~/.cache/zig
+          key: zig-bench-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**/*.zig') }}
+          restore-keys: |
+            zig-bench-
+
       - name: Install hyperfine
         run: |
           curl -L -o /tmp/hyperfine.deb https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb

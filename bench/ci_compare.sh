@@ -136,7 +136,12 @@ echo ""
 
 # Step 1: Build and benchmark current HEAD
 echo "[1/3] Building and benchmarking current HEAD..."
-(cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe)
+if ! (cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1); then
+    echo "ERROR: zig build -Doptimize=ReleaseSafe failed" >&2
+    echo "Retrying with verbose output..." >&2
+    (cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1) || true
+    exit 2
+fi
 
 CURRENT_RESULTS="$TMPDIR_CI/current.txt"
 : > "$CURRENT_RESULTS"
