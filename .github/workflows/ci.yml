@@ -225,10 +225,13 @@ jobs:
           curl -L -o /tmp/hyperfine.deb https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
           sudo dpkg -i /tmp/hyperfine.deb
 
+      - name: Build ReleaseSafe
+        run: zig build -Doptimize=ReleaseSafe
+
       - name: Benchmark regression check
         if: github.event_name == 'pull_request'
-        run: bash bench/ci_compare.sh --base=origin/main --threshold=20 --runs=3 --warmup=1
+        run: bash bench/ci_compare.sh --base=origin/main --threshold=20 --runs=3 --warmup=1 --skip-build
 
       - name: Benchmark record (main push)
         if: github.event_name == 'push'
-        run: bash bench/ci_compare.sh --record-only --runs=3 --warmup=1
+        run: bash bench/ci_compare.sh --record-only --runs=3 --warmup=1 --skip-build

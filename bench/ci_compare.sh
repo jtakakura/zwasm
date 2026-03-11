@@ -26,6 +26,7 @@ THRESHOLD=20
 RUNS=3
 WARMUP=1
 RECORD_ONLY=false
+SKIP_BUILD=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -34,6 +35,7 @@ for arg in "$@"; do
         --runs=*) RUNS="${arg#*=}" ;;
         --warmup=*) WARMUP="${arg#*=}" ;;
         --record-only) RECORD_ONLY=true ;;
+        --skip-build) SKIP_BUILD=true ;;
     esac
 done
 
@@ -136,15 +138,8 @@ echo ""
 
 # Step 1: Build and benchmark current HEAD
 echo "[1/3] Building and benchmarking current HEAD..."
-BUILD_LOG="$TMPDIR_CI/build.log"
-set +e
-(cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe 2>&1) | tee "$BUILD_LOG"
-BUILD_EXIT=${PIPESTATUS[0]}
-set -e
-if [[ "$BUILD_EXIT" -ne 0 ]]; then
-    echo "ERROR: zig build -Doptimize=ReleaseSafe failed (exit $BUILD_EXIT)" >&2
-    cat "$BUILD_LOG" >&2
-    exit "$BUILD_EXIT"
+if [[ "$SKIP_BUILD" != "true" ]]; then
+    (cd "$PROJECT_DIR" && zig build -Doptimize=ReleaseSafe)
 fi
 
 CURRENT_RESULTS="$TMPDIR_CI/current.txt"
