@@ -95,6 +95,9 @@ When in doubt, **continue**.
    - Quick check: `bash bench/run_bench.sh --quick`
    - **Record**: `bash bench/record.sh --id=ID --reason="REASON"` (appends to history.yaml)
 7. **Size guard**: Binary ≤ 1.5MB (stripped), memory ≤ 4.5MB RSS
+8. **Minimal build** (when adding tests): `zig build test -Djit=false -Dcomponent=false -Dwat=false`
+   Tests using WAT must guard with `if (!build_options.enable_wat) return error.SkipZigTest;`
+   Tests using JIT must guard with `if (!build_options.enable_jit) return error.SkipZigTest;`
 8. **decisions.md / checklist.md / spec-support.md / memo.md**: Update as needed
 
 ### Merge Gate Checklist
@@ -106,6 +109,9 @@ When in doubt, **continue**.
 - `bash test/realworld/run_compat.sh` — PASS=50, FAIL=0, CRASH=0
 - `bash test/c_api/run_ffi_test.sh --build` — 0 failed
 - Benchmarks pass (no regression)
+- **Minimal build**: `zig build test -Djit=false -Dcomponent=false -Dwat=false` — 0 fail
+  (WAT-dependent tests must have `if (!build_options.enable_wat) return error.SkipZigTest;`)
+- **CI green**: `gh run list --branch main --limit 1` — check after push
 Fix root cause before merging if Ubuntu reveals new failures.
 
 ## Build & Test
