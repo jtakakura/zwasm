@@ -47,7 +47,7 @@ Session handover document. Read at session start.
     v128 load/store/const, extract/replace/lane, splat, extend/narrow, shift, convert,
     bitmask (i8x16/i32x4/i64x2), swizzle (PSHUFB), bitselect, any_true
   - Ubuntu x86_64: 62,263/62,263 spec tests pass
-  - **Next**: all_true, unsigned compare, load variants, extmul, remaining convert, dot
+  - **Next**: load variants (splat/zero/extend), extmul, unsigned compare, remaining convert
   - **Long-term**: NEON register allocator or contiguous v128 storage
 - See `@./.dev/roadmap.md` Phase 13 for step breakdown (13.0-13.8)
 
