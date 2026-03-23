@@ -5202,6 +5202,59 @@ pub const Compiler = struct {
                 self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
             },
+            // --- i8x16.shuffle: TBL with 2-register table ---
+            0x0D => {
+                // Load both v128 inputs into consecutive V registers (V0, V1)
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1); // table[0] → V0
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field); // table[1] → V1
+                // Load shuffle mask from pool64 into V2
+                const pool_idx = instr.operand;
+                if (pool_idx + 1 < self.pool64.len) {
+                    const V2: u5 = 2;
+                    const lo = self.pool64[pool_idx];
+                    const hi = self.pool64[pool_idx + 1];
+                    const lo_instrs = a64.loadImm64(SCRATCH, lo);
+                    for (lo_instrs) |inst| self.emit(inst);
+                    self.emit(a64.movz64(SCRATCH2, 0, 0)); // clear SCRATCH2 for hi
+                    // MOVQ to V2: use GP→NEON
+                    // FMOV Dd, Xn = 0x9E670000 | (Xn << 5) | Vd
+                    self.emit(0x9E670000 | (@as(u32, SCRATCH) << 5) | V2);
+                    const hi_instrs = a64.loadImm64(SCRATCH, hi);
+                    for (hi_instrs) |inst| self.emit(inst);
+                    // INS V2.D[1], SCRATCH
+                    self.emit(a64.insVdD1(V2, SCRATCH));
+                    // TBL Vd.16B, {V0.16B, V1.16B}, V2.16B
+                    // TBL 2-register: 0x4E000000 | (len=01 << 13) | (Vm << 16) | (Vn << 5) | Vd
+                    // len=01 means 2 consecutive registers starting from Vn
+                    self.emit(0x4E002000 | (@as(u32, V2) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                    self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                    return true;
+                }
+                return false;
+            },
+
+            // --- relaxed ops: map to non-relaxed equivalents ---
+            // relaxed_swizzle (0x100) = same as swizzle (0x0E)
+            0x100 => {
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                self.emit(0x4E000000 | (@as(u32, SIMD_SCRATCH1) << 16) | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            // relaxed_trunc (0x101-0x104) = same as trunc_sat
+            0x101 => { self.emitSimdUnaryNeon(instr, 0x4EA1B800); return true; }, // relaxed i32x4.trunc_sat_f32x4_s
+            0x102 => { self.emitSimdUnaryNeon(instr, 0x6EA1B800); return true; }, // relaxed i32x4.trunc_sat_f32x4_u
+            // relaxed_madd/nmadd (0x105-0x108): trampoline (ternary, complex)
+            // relaxed_laneselect (0x109-0x10C): same as bitselect
+            // relaxed_min/max (0x10D-0x110): same as min/max
+            0x10D => { self.emitSimdBinaryNeon(instr, 0x4EA0F400); return true; }, // f32x4.relaxed_min = fmin
+            0x10E => { self.emitSimdBinaryNeon(instr, 0x4E20F400); return true; }, // f32x4.relaxed_max = fmax
+            0x10F => { self.emitSimdBinaryNeon(instr, 0x4EE0F400); return true; }, // f64x2.relaxed_min
+            0x110 => { self.emitSimdBinaryNeon(instr, 0x4E60F400); return true; }, // f64x2.relaxed_max
+            // relaxed_q15mulr (0x111) = same as q15mulr
+            // relaxed_dot (0x112-0x113): trampoline (ternary)
+
             // --- v128.load ---
             0x00 => {
                 if (!self.has_memory) return false;

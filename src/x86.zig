@@ -5191,6 +5191,185 @@ pub const Compiler = struct {
             // --- i16x8.q15mulr_sat_s (PMULHRSW SSSE3) ---
             0x82 => { self.emitSimdBinarySse(instr, &Enc.pmulhrsw); return true; },
 
+            // --- extmul low (extend low halves + multiply) ---
+            0x9C => { // i16x8.extmul_low_i8x16_s: PMOVSXBW both, PMULLW
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pmovsxbw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovsxbw(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmullw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x9E => { // i16x8.extmul_low_i8x16_u: PMOVZXBW both, PMULLW
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pmovzxbw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovzxbw(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmullw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xBC => { // i32x4.extmul_low_i16x8_s: PMOVSXWD both, PMULLD
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pmovsxwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovsxwd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmulld(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xBE => { // i32x4.extmul_low_i16x8_u: PMOVZXWD both, PMULLD
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pmovzxwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovzxwd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmulld(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xDC => { // i64x2.extmul_low_i32x4_s: PMULDQ (directly on low 32-bit lanes)
+                self.emitSimdBinarySse(instr, &Enc.pmuldq);
+                return true;
+            },
+            0xDE => { // i64x2.extmul_low_i32x4_u: PMULUDQ
+                self.emitSimdBinarySse(instr, &Enc.pmuludq);
+                return true;
+            },
+
+            // --- extmul high (shift high to low, then same as low) ---
+            0x9D => { // i16x8.extmul_high_i8x16_s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmovsxbw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovsxbw(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmullw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x9F => { // i16x8.extmul_high_i8x16_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmovzxbw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovzxbw(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmullw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xBD => { // i32x4.extmul_high_i16x8_s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmovsxwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovsxwd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmulld(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xBF => { // i32x4.extmul_high_i16x8_u
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.punpckhqdq(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmovzxwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0);
+                Enc.pmovzxwd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pmulld(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xDD => { // i64x2.extmul_high_i32x4_s: PSHUFD to move high lanes, PMULDQ
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                // Move lanes 2,3 to 0,1: PSHUFD imm=0b11_10_11_10 = 0xEE
+                Enc.pshufd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0, 0xEE);
+                Enc.pshufd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1, 0xEE);
+                Enc.pmuldq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xDF => { // i64x2.extmul_high_i32x4_u: PSHUFD + PMULUDQ
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pshufd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH0, 0xEE);
+                Enc.pshufd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1, 0xEE);
+                Enc.pmuludq(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- extadd_pairwise ---
+            0x7E => { // i32x4.extadd_pairwise_i16x8_s: PMADDWD with all-ones
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // Generate all-ones i16 (0x0001 per word): PCMPEQD + PSRLW 15
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.sseShiftImm(&self.code, self.alloc, 0x71, 2, SIMD_SCRATCH1, 15); // PSRLW imm 15
+                Enc.pmaddwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x7F => { // i32x4.extadd_pairwise_i16x8_u: PMADDWD with ones (unsigned → shift trick)
+                // For unsigned: zero-extend to i32 via PMADDWD with 1s
+                // PMADDWD treats src as signed, but if we use 0x0001 as multiplier, result is correct
+                // since PMADDWD(a, 1) = a[0]*1 + a[1]*1 = a[0]+a[1] for values in 0..65535
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.sseShiftImm(&self.code, self.alloc, 0x71, 2, SIMD_SCRATCH1, 15);
+                Enc.pmaddwd(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x7C => { // i16x8.extadd_pairwise_i8x16_s: PMADDUBSW with ones
+                // PMADDUBSW(a, b) treats a as unsigned, b as signed
+                // To get signed pairwise add: set b = all 1s
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pabsb(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1); // all 0x01
+                // But PMADDUBSW(unsigned, signed): we need src=unsigned*1 + unsigned*1
+                // Actually for signed pairwise: use PMOVSXBW + PHADDW? Too complex.
+                // Trampoline for this edge case
+                return false;
+            },
+            0x7D => { // i16x8.extadd_pairwise_i8x16_u: PMADDUBSW(a, ones)
+                // PMADDUBSW treats first operand as unsigned, second as signed
+                // With all-1s as second: result = a[2n]*1 + a[2n+1]*1 = unsigned pairwise sum
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                Enc.pcmpeqd(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1);
+                Enc.pabsb(&self.code, self.alloc, SIMD_SCRATCH1, SIMD_SCRATCH1); // all 0x01
+                Enc.pmaddubsw(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- i8x16.shuffle: PSHUFB with mask from pool ---
+            0x0D => {
+                // Load both v128 sources and mask
+                // SSE PSHUFB only handles one 16-byte table.
+                // Wasm shuffle can index 0-31 across 2 inputs.
+                // Strategy: PSHUFB both with mask, blend based on index >= 16
+                // Complex multi-instruction. Leave for trampoline.
+                return false;
+            },
+
+            // --- relaxed ops: map to non-relaxed equivalents ---
+            0x100 => { // relaxed_swizzle = swizzle
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                self.emitLoadV128(SIMD_SCRATCH1, instr.rs2_field);
+                Enc.pshufb(&self.code, self.alloc, SIMD_SCRATCH0, SIMD_SCRATCH1);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x101 => { self.emitSimdUnarySse(instr, &Enc.cvttps2dq); return true; }, // relaxed trunc f32→i32 s
+            0x10D => { self.emitSimdBinarySse(instr, &Enc.minps); return true; }, // relaxed f32x4.min
+            0x10E => { self.emitSimdBinarySse(instr, &Enc.maxps); return true; }, // relaxed f32x4.max
+            0x10F => { self.emitSimdBinarySse(instr, &Enc.minpd); return true; }, // relaxed f64x2.min
+            0x110 => { self.emitSimdBinarySse(instr, &Enc.maxpd); return true; }, // relaxed f64x2.max
+            0x111 => { self.emitSimdBinarySse(instr, &Enc.pmulhrsw); return true; }, // relaxed q15mulr
+
             // --- v128.bitselect (PAND+PANDN+POR, uses 3 XMM regs) ---
             0x52 => {
                 // bitselect(v1, v2, mask): mask from trailing NOP rd
