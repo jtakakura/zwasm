@@ -4223,8 +4223,36 @@ pub const Compiler = struct {
             0x50 => { self.emitSimdBinaryNeon(instr, a64.orrV16b(0, 0, 0)); return true; }, // v128.or
             0x51 => { self.emitSimdBinaryNeon(instr, a64.eorV16b(0, 0, 0)); return true; }, // v128.xor
             0x4D => { self.emitSimdUnaryNeon(instr, a64.notV16b(0, 0)); return true; }, // v128.not
-            // v128.load/store: trampoline (guard page recovery not yet integrated)
-            0x00, 0x0B => return false,
+            // --- v128.load ---
+            0x00 => {
+                if (!self.has_memory) return false;
+                const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
+                self.emit(a64.uxtw(SCRATCH, addr_reg));
+                self.emitAddOffset(SCRATCH, instr.operand);
+                // Always emit explicit bounds check for v128 (16 bytes)
+                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 16));
+                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                self.emitCondError(.hi, 6); // OutOfBoundsMemoryAccess
+                // LDR Q0, [MEM_BASE, SCRATCH]
+                self.emit(a64.ldrQreg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            // --- v128.store ---
+            0x0B => {
+                if (!self.has_memory) return false;
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rd);
+                const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
+                self.emit(a64.uxtw(SCRATCH, addr_reg));
+                self.emitAddOffset(SCRATCH, instr.operand);
+                // Always emit explicit bounds check for v128 (16 bytes)
+                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 16));
+                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                self.emitCondError(.hi, 6);
+                // STR Q0, [MEM_BASE, SCRATCH]
+                self.emit(a64.strQreg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
+                return true;
+            },
             // --- v128.const ---
             0x0C => {
                 // Load 128-bit constant from pool64[operand] (2x u64)
