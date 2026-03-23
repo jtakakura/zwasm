@@ -30,15 +30,16 @@ Session handover document. Read at session start.
   - SIMD bench: 19-30x slower than scalar (trampoline overhead, was 20-53x)
   - All tests + samples pass. JIT compiles SIMD hot loops.
 - **5 real-world SIMD C samples** in test/realworld/c_simd/ (wasi-sdk -msimd128)
-- **13.2+ Native NEON** (in progress): **198 opcodes** now native ARM64 (77% of 256)
+- **13.2+ Native NEON** (in progress): **208 opcodes** now native ARM64 (81% of 256)
   - All comparisons, arithmetic, saturating, shifts, lane ops, extend/narrow, extmul
-  - All float ops (arithmetic, compare, rounding, sqrt, min/max, convert)
+  - All float ops (arithmetic, compare, rounding, sqrt, min/max, pmin/pmax, convert)
   - bitselect, swizzle, popcnt, extadd_pairwise, q15mulr, avgr_u
+  - v128.any_true, all_true (i8x16/i16x8/i32x4/i64x2), i32x4.dot_i16x8_s
   - v128.load/store/const, splat, bitwise, demote/promote, f64x2 convert
-  - SIMD bench: image_blend 4.8x faster than scalar, matrix_mul 1.3x
-  - **Remaining** (~58 ops): load variants (splat/lane/extend/zero), bitmask, any/all_true, i32x4.dot, i64x2.mul, i32x4_trunc_sat_f64x2, pmin/pmax, shuffle, all relaxed ops
+  - SIMD bench: image_blend 5.2x faster than scalar, matrix_mul 1.4x
+  - **Remaining** (~48 ops): load variants (splat/lane/extend/zero), bitmask, i64x2.mul, i32x4_trunc_sat_f64x2, shuffle, all relaxed ops (20)
   - **Next priorities**:
-    1. bitmask, any/all_true, dot, pmin/pmax (high-impact ops)
+    1. bitmask (4 ops, multi-instr), load variants, i64x2.mul
     2. x86 SSE port
     3. Long-term: NEON register allocator or contiguous v128 storage
 - See `@./.dev/roadmap.md` Phase 13 for step breakdown (13.0-13.8)
