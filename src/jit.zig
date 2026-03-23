@@ -4223,6 +4223,8 @@ pub const Compiler = struct {
             0x50 => { self.emitSimdBinaryNeon(instr, a64.orrV16b(0, 0, 0)); return true; }, // v128.or
             0x51 => { self.emitSimdBinaryNeon(instr, a64.eorV16b(0, 0, 0)); return true; }, // v128.xor
             0x4D => { self.emitSimdUnaryNeon(instr, a64.notV16b(0, 0)); return true; }, // v128.not
+            // v128.load/store: trampoline (guard page recovery not yet integrated)
+            0x00, 0x0B => return false,
             // --- v128.const ---
             0x0C => {
                 // Load 128-bit constant from pool64[operand] (2x u64)
