@@ -4430,6 +4430,12 @@ pub const Compiler = struct {
                 return true;
             },
 
+            // --- i64x2 extmul ---
+            0xDC => { self.emitSimdBinaryNeon(instr, 0x0EA0C000); return true; }, // i64x2.extmul_low_i32x4_s — SMULL .2D
+            0xDD => { self.emitSimdBinaryNeon(instr, 0x4EA0C000); return true; }, // i64x2.extmul_high_i32x4_s — SMULL2 .2D
+            0xDE => { self.emitSimdBinaryNeon(instr, 0x2EA0C000); return true; }, // i64x2.extmul_low_i32x4_u — UMULL .2D
+            0xDF => { self.emitSimdBinaryNeon(instr, 0x6EA0C000); return true; }, // i64x2.extmul_high_i32x4_u — UMULL2 .2D
+
             // --- i64x2 comparisons (signed only, no unsigned in wasm) ---
             0xD6 => { self.emitSimdBinaryNeon(instr, 0x6EE08C00); return true; }, // i64x2.eq — CMEQ .2D
             0xD7 => { // i64x2.ne — CMEQ + NOT
@@ -4480,6 +4486,14 @@ pub const Compiler = struct {
             0x97 => { self.emitSimdBinaryNeon(instr, 0x6E606C00); return true; }, // i16x8.min_u — UMIN .8H
             0x98 => { self.emitSimdBinaryNeon(instr, 0x4E606400); return true; }, // i16x8.max_s — SMAX .8H
             0x99 => { self.emitSimdBinaryNeon(instr, 0x6E606400); return true; }, // i16x8.max_u — UMAX .8H
+            0x82 => { self.emitSimdBinaryNeon(instr, 0x6E60B400); return true; }, // i16x8.q15mulr_sat_s — SQRDMULH .8H
+            0x94 => { self.emitSimdUnaryNeon(instr, 0x4E618800); return true; }, // f64x2.nearest — FRINTN .2D
+            0x9B => { self.emitSimdBinaryNeon(instr, 0x6E601400); return true; }, // i16x8.avgr_u — URHADD .8H
+            // --- i16x8 extmul ---
+            0x9C => { self.emitSimdBinaryNeon(instr, 0x0E20C000); return true; }, // i16x8.extmul_low_i8x16_s — SMULL .8H
+            0x9D => { self.emitSimdBinaryNeon(instr, 0x4E20C000); return true; }, // i16x8.extmul_high_i8x16_s — SMULL2 .8H
+            0x9E => { self.emitSimdBinaryNeon(instr, 0x2E20C000); return true; }, // i16x8.extmul_low_i8x16_u — UMULL .8H
+            0x9F => { self.emitSimdBinaryNeon(instr, 0x6E20C000); return true; }, // i16x8.extmul_high_i8x16_u — UMULL2 .8H
             0x8F => { self.emitSimdBinaryNeon(instr, 0x4E600C00); return true; }, // i16x8.add_sat_s — SQADD .8H
             0x90 => { self.emitSimdBinaryNeon(instr, 0x6E600C00); return true; }, // i16x8.add_sat_u — UQADD .8H
             0x92 => { self.emitSimdBinaryNeon(instr, 0x4E602C00); return true; }, // i16x8.sub_sat_s — SQSUB .8H
@@ -4670,6 +4684,17 @@ pub const Compiler = struct {
                 return true;
             },
 
+            // --- f32x4 rounding ---
+            0x67 => { self.emitSimdUnaryNeon(instr, 0x4EA18800); return true; }, // f32x4.ceil — FRINTP .4S
+            0x68 => { self.emitSimdUnaryNeon(instr, 0x4E219800); return true; }, // f32x4.floor — FRINTM .4S
+            0x69 => { self.emitSimdUnaryNeon(instr, 0x4EA19800); return true; }, // f32x4.trunc — FRINTZ .4S
+            0x6A => { self.emitSimdUnaryNeon(instr, 0x4E218800); return true; }, // f32x4.nearest — FRINTN .4S
+
+            // --- f64x2 rounding (some subs split across ranges) ---
+            0x74 => { self.emitSimdUnaryNeon(instr, 0x4EE18800); return true; }, // f64x2.ceil — FRINTP .2D
+            0x75 => { self.emitSimdUnaryNeon(instr, 0x4E619800); return true; }, // f64x2.floor — FRINTM .2D
+            0x7A => { self.emitSimdUnaryNeon(instr, 0x4EE19800); return true; }, // f64x2.trunc — FRINTZ .2D
+
             // --- i8x16 shift ---
             0x6B => { // i8x16.shl — DUP + SSHL
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
@@ -4807,6 +4832,12 @@ pub const Compiler = struct {
                 return true;
             },
 
+            // --- i32x4 extmul ---
+            0xBC => { self.emitSimdBinaryNeon(instr, 0x0E60C000); return true; }, // i32x4.extmul_low_i16x8_s — SMULL .4S
+            0xBD => { self.emitSimdBinaryNeon(instr, 0x4E60C000); return true; }, // i32x4.extmul_high_i16x8_s — SMULL2 .4S
+            0xBE => { self.emitSimdBinaryNeon(instr, 0x2E60C000); return true; }, // i32x4.extmul_low_i16x8_u — UMULL .4S
+            0xBF => { self.emitSimdBinaryNeon(instr, 0x6E60C000); return true; }, // i32x4.extmul_high_i16x8_u — UMULL2 .4S
+
             // --- i64x2 arithmetic ---
             0xCE => { self.emitSimdBinaryNeon(instr, 0x4EE08400); return true; }, // i64x2.add — ADD .2D
             0xD1 => { self.emitSimdBinaryNeon(instr, 0x6EE08400); return true; }, // i64x2.sub — SUB .2D
@@ -4913,8 +4944,44 @@ pub const Compiler = struct {
             // --- trunc/convert ---
             0xF8 => { self.emitSimdUnaryNeon(instr, 0x4EA1B800); return true; }, // i32x4.trunc_sat_f32x4_s — FCVTZS .4S
             0xF9 => { self.emitSimdUnaryNeon(instr, 0x6EA1B800); return true; }, // i32x4.trunc_sat_f32x4_u — FCVTZU .4S
-            0xFA => { self.emitSimdUnaryNeon(instr, 0x4E21D800); return true; }, // f32x4.convert_i32x4_s — SCVTF .4S
-            0xFB => { self.emitSimdUnaryNeon(instr, 0x6E21D800); return true; }, // f32x4.convert_i32x4_u — UCVTF .4S
+            0xFA => { self.emitSimdUnaryNeon(instr, 0x4E21B800); return true; }, // f32x4.convert_i32x4_s — SCVTF .4S
+            0xFB => { self.emitSimdUnaryNeon(instr, 0x6E21B800); return true; }, // f32x4.convert_i32x4_u — UCVTF .4S
+
+            // --- f32x4 demote / f64x2 promote ---
+            0x5E => { // f32x4.demote_f64x2_zero — FCVTN Vd.2S, Vn.2D (upper zeroed)
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // FCVTN Vd.2S, Vn.2D = 0x0E616800 (Q=0 zeroes upper)
+                self.emit(0x0E616800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0x5F => { // f64x2.promote_low_f32x4 — FCVTL Vd.2D, Vn.2S
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // FCVTL Vd.2D, Vn.2S = 0x0E617800
+                self.emit(0x0E617800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+
+            // --- f64x2 convert from low i32x4 ---
+            0xFE => { // f64x2.convert_low_i32x4_s — SSHLL + SCVTF
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // SSHLL Vd.2D, Vn.2S, #0 = 0x0F20A400
+                self.emit(0x0F20A400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                // SCVTF Vd.2D, Vn.2D = 0x4E61B800
+                self.emit(0x4E61B800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
+            0xFF => { // f64x2.convert_low_i32x4_u — USHLL + UCVTF
+                self.emitLoadV128(SIMD_SCRATCH0, instr.rs1);
+                // USHLL Vd.2D, Vn.2S, #0 = 0x2F20A400
+                self.emit(0x2F20A400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                // UCVTF Vd.2D, Vn.2D = 0x6E61B800
+                self.emit(0x6E61B800 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
+                self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
+                return true;
+            },
             // --- v128.load ---
             0x00 => {
                 if (!self.has_memory) return false;
