@@ -24,18 +24,23 @@ Session handover document. Read at session start.
   - All lane/load/store ops, shuffle (TBL), bitselect, swizzle, bitmask, any/all_true
   - Relaxed: madd/nmadd (FMLA/FMLS), laneselect (BSL), q15mulr, trunc, min/max
   - Trampoline only: relaxed_dot (2 ops), relaxed_laneselect (1 op) — ternary ops
-  - SIMD bench (Mac): image_blend **5.5x**, matrix_mul **1.8x** faster than scalar
+  - Trampoline only: relaxed_dot (2 ops), relaxed_laneselect (1 op) — ternary ops
 - **13.3 DONE — x86 SSE**: **244/256 native (95.3%)**
   - Same coverage as ARM64 except: i8x16 byte shift (3), popcnt (1),
     i64x2.shr_s (1), unsigned trunc/convert (5), relaxed_dot (2)
   - SSE4.1 minimum. v128 via PINSRQ/PEXTRQ. SysV + Windows ABI trampoline.
   - Ubuntu x86_64: 62,263/62,263 spec tests pass
-- **Phase 13.7 TODO** (next session):
-  1. Real-world SIMD benchmark expansion (Emscripten/Rust wasm, non-toy programs)
-  2. wasmtime comparison: precise timing on identical workloads
-  3. README + docs + book full update
-  4. Phase 13.8 gate check → v2.0.0 candidate
-- **Long-term**: NEON register allocator or contiguous v128 storage (gap closure)
+- **13.7 DONE — SIMD benchmarks & wasmtime comparison** (2026-03-23):
+  - **Microbenchmarks (WAT)**: image_blend **4.7x**, matrix_mul **1.6x** (beats wasmtime!),
+    byte_search **1.2x** SIMD faster. dot_product 0.75x (v128.load overhead).
+  - **Real-world (C -msimd128)**: 5 new benchmarks (grayscale, box_blur, sum_reduce,
+    byte_freq, nbody). box_blur **1.4x**, sum_reduce **1.1x** SIMD faster.
+    Others slower due to compiler-generated patterns (i16x8.replace_lane).
+  - **vs wasmtime gap**: Microbench best **0.83x** (matrix_mul beats wasmtime!).
+    Real-world scalar gap 13-131x (C runtime + WASI overhead).
+  - Full data: `bench/simd_comparison.yaml`
+- **Phase 13.8 TODO**: gate check, `-Dsimd=false` minimal build, record benchmarks
+- **Long-term**: contiguous v128 storage (close split-storage gap), compiler-generated code perf
 - See `@./.dev/roadmap.md` Phase 13 for step breakdown (13.0-13.8)
 
 ### Key Design (D130)
