@@ -20,10 +20,10 @@ Prefix: W## (to distinguish from CW's F## items).
   (vs 1.2-3.8x on microbenchmarks). Investigate: JIT for WASI C runtime overhead,
   replace_lane fusion, and SIMD pattern recognition.
 
-- [ ] W39: Multi-value return JIT support
-  Functions with results.len > 1 skip RegIR/JIT entirely (vm.zig line 553).
-  wide-arithmetic ops (i64.add128 etc.) and other multi-value functions fall back
-  to predecoded IR interpreter. Extend RegIR to handle multi-value returns.
+- [ ] W39: Multi-value return JIT support (partially done)
+  OP_RETURN_MULTI opcode added, JIT epilogue supports multi-value return.
+  Remaining: RegIR block handling for multi-value arity (if/else/block with
+  type index returning >1 values). Guard `results.len <= 1` still active.
 
 ## Resolved (summary)
 
