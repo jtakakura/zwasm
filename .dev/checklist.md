@@ -33,8 +33,8 @@ Prefix: W## (to distinguish from CW's F## items).
   3. rust_file_io and tinygo_sort: lower priority
 
 - [ ] W42: wasmtime 互換性差異 (JIT 無関係)
-  go_math_big — different output from wasmtime (same in interp and JIT).
-  Likely Go runtime behavior differences (env, args, or WASI capability gaps).
+  go_math_big — crashes with `environ_sizes_get failed` (same in interp and JIT).
+  環境依存: PASS/DIFF が実行環境で変わる。低優先。
 
 ## Resolved (summary)
 
