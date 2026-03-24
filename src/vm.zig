@@ -4355,6 +4355,7 @@ pub const Vm = struct {
         // Arm fuel/deadline interval for JIT
         self.armJitFuel();
 
+
         // Call OSR entry: sets up callee-saved, memory cache, then jumps to loop body
         const err_code = osr_fn(regs_ptr, @ptrCast(self), @ptrCast(instance));
 
@@ -4455,17 +4456,20 @@ pub const Vm = struct {
     ) WasmError!void {
         count.* += 1;
         if (count.* == jit_mod.BACK_EDGE_THRESHOLD) {
-            // Functions with reentry guards (C/C++ init patterns like __cxa_atexit)
-            // cannot be re-entered from pc=0 after JitRestart (guard triggers unreachable).
-            if (hasReentryGuard(reg.code)) {
-                wf.jit_failed = true;
-                if (trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "reentry guard — skip back-edge JIT");
-                return;
-            }
             // Same IR limit as normal path — large functions produce incorrect JIT code
             if (reg.code.len > jit_mod.MAX_JIT_IR_INSTRS) {
                 wf.jit_failed = true;
                 if (trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "too many IR instrs — skip back-edge JIT");
+                return;
+            }
+            // Functions with reentry guards (C/C++ init patterns like __cxa_atexit)
+            // cannot be re-entered from pc=0 after JitRestart (guard triggers unreachable).
+            // TODO(W38): OSR for reentry guards needs v128 state synchronization fix.
+            // The JIT's SIMD v128 state at OSR entry doesn't match interpreter state
+            // for complex functions with interleaved scalar/SIMD register reuse.
+            if (hasReentryGuard(reg.code)) {
+                wf.jit_failed = true;
+                if (trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "reentry guard — skip back-edge JIT");
                 return;
             }
             // Go state machines use br_table for dispatch — OSR can't help because

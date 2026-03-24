@@ -1074,6 +1074,8 @@ pub const Compiler = struct {
     vm_ptr_cached: bool,
     /// True when inst_ptr is cached in x21 (only when reg_count <= 13 and has self-calls).
     inst_ptr_cached: bool,
+    /// True when the function contains SIMD opcodes. Used to guard v128 sync in MOV/CONST.
+    has_simd: bool,
     /// True when call_depth is cached in x28 (non-memory self-call functions only).
     /// Eliminates per-call memory load/store for depth tracking.
     depth_reg_cached: bool,
@@ -1165,6 +1167,7 @@ pub const Compiler = struct {
             .fp_dreg_dirty = .{false} ** FP_CACHE_SIZE,
             .vm_ptr_cached = false,
             .inst_ptr_cached = false,
+            .has_simd = false,
             .depth_reg_cached = false,
             .fp_cache_limit = FP_CACHE_SIZE,
             .call_live_set = 0,
@@ -2253,6 +2256,11 @@ pub const Compiler = struct {
         self.emit(a64.str64(1, REGS_PTR, @intCast((@as(u32, self.reg_count) + 2) * 8)));
         self.emit(a64.str64(2, REGS_PTR, @intCast((@as(u32, self.reg_count) + 3) * 8)));
 
+        // Cache VM/Instance pointers in callee-saved regs (x20/x21) — must be
+        // BEFORE emitLoadMemCache which uses emitLoadInstPtr (reads cached x21).
+        if (self.vm_ptr_cached) self.emit(a64.mov64(20, 1)); // x20 = vm_ptr
+        if (self.inst_ptr_cached) self.emit(a64.mov64(21, 2)); // x21 = inst_ptr
+
         // Load memory cache (if function uses memory)
         // Must be BEFORE loading vregs — BLR trashes caller-saved (x0-x18).
         if (self.has_memory) {
@@ -2444,6 +2452,14 @@ pub const Compiler = struct {
         self.ir_slice = ir;
         self.branch_targets_slice = branch_targets;
 
+        // Detect SIMD presence for v128 sync in MOV/CONST
+        for (ir) |scan_instr| {
+            if (scan_instr.op >= predecode_mod.SIMD_BASE and scan_instr.op <= predecode_mod.SIMD_BASE + 0x113) {
+                self.has_simd = true;
+                break;
+            }
+        }
+
         // Mark params as written (they're initialized by the caller)
         for (0..self.param_count) |i| {
             if (i < 128) self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(i));
@@ -2529,6 +2545,12 @@ pub const Compiler = struct {
                     const src = self.getOrLoad(instr.rs1, SCRATCH);
                     self.storeVreg(instr.rd, src);
                 }
+                // Copy simd_v128[rd] = simd_v128[rs1] for v128 value correctness.
+                // The interpreter's mov copies both regs[] and simd_v128[]; the JIT
+                // must do the same to keep SIMD state consistent.
+                if (self.has_simd) {
+                    self.emitCopyV128(instr.rd, instr.rs1);
+                }
             },
             regalloc_mod.OP_CONST32 => {
                 const d = destReg(instr.rd);
@@ -2543,6 +2565,8 @@ pub const Compiler = struct {
                     self.emit(a64.movk64(d, @truncate(val >> 16), 1));
                 }
                 self.storeVreg(instr.rd, d);
+                // Clear simd_v128[rd] — scalar write invalidates v128 high bits.
+                if (self.has_simd) self.emitClearV128(instr.rd);
             },
             regalloc_mod.OP_CONST64 => {
                 const d = destReg(instr.rd);
@@ -2550,6 +2574,7 @@ pub const Compiler = struct {
                 const instrs = a64.loadImm64(d, val);
                 for (instrs) |inst| self.emit(inst);
                 self.storeVreg(instr.rd, d);
+                if (self.has_simd) self.emitClearV128(instr.rd);
             },
 
             // --- Control flow ---
@@ -4200,6 +4225,25 @@ pub const Compiler = struct {
         self.emitSimdV128Addr(vreg);
         // LDR Q, [SCRATCH] — single 128-bit load
         self.emit(a64.ldrFp128(qd, SCRATCH, 0));
+    }
+
+    /// Copy simd_v128[dst] = simd_v128[src] (128-bit). Used by OP_MOV to keep
+    /// v128 state consistent with the interpreter (which copies both regs[] and simd_v128[]).
+    fn emitCopyV128(self: *Compiler, dst: u16, src: u16) void {
+        if (dst == src) return;
+        self.emitSimdV128Addr(src);
+        self.emit(a64.ldrFp128(SIMD_SCRATCH0, SCRATCH, 0));
+        self.emitSimdV128Addr(dst);
+        self.emit(a64.strFp128(SIMD_SCRATCH0, SCRATCH, 0));
+    }
+
+    /// Clear simd_v128[rd] = {0, 0}. Used when scalar ops (const32/const64) write
+    /// to a vreg, invalidating any stale v128 high bits.
+    fn emitClearV128(self: *Compiler, rd: u16) void {
+        self.emitSimdV128Addr(rd);
+        // STR XZR, [SCRATCH, #0] + STR XZR, [SCRATCH, #8] — zero 16 bytes
+        self.emit(a64.str64(31, SCRATCH, 0)); // xzr → [scratch]
+        self.emit(a64.str64(31, SCRATCH, 8)); // xzr → [scratch+8]
     }
 
     /// Store NEON Q register to simd_v128[vreg] (contiguous 128-bit).
