@@ -14,26 +14,32 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-**W38 merged to main** — v128 sync fix + investigation.
+**W38 Lazy AOT — merge gate** on branch `perf/w38-lazy-aot`.
 
-- ARM64 JIT v128 sync: MOV copies simd_v128, CONST clears it (correctness bug fix)
-- OSR prologue: x20/x21 caching before emitLoadMemCache
-- Root cause: C-compiled functions have reentry guards preventing JIT (13-131x gap)
-- OSR attempted but blocked by v128 state transfer for complex functions
+### Changes
 
-### Next: Lazy AOT (Recommended approach for W38)
+- HOT_THRESHOLD 10 → 3: earlier JIT compilation
+- `back_edge_bailed` flag: reentry guard/br_table bail separated from `jit_failed`
+- ARM64 extract_lane: imm5 shift fix + upper-half lane memory load
+- JIT `jitMemGrow`: u32 → u64 for memory64 `-1` return
+- JIT trampoline: cross-module call passes callee's instance (not caller's)
+- Tests: force_interpreter for fuel/deadline/memory resource tests
 
-Compile all functions to JIT at module load / first call, bypassing interpreter.
-Eliminates tier-up state transfer problem entirely (matches wasmtime architecture).
-Detailed research and 4 candidate approaches documented in:
-**`@./.dev/references/w38-osr-research.md`** — read this before starting.
+### Gate Status
+
+- `zig build test`: all pass
+- Spec: **62,263/62,263 (100%)**
+- E2E: 792/792
+- Real-world: 41/50 (6 JIT bugs → W41, 3 wasmtime diffs → W42)
+- Benchmarks: no regression
 
 ### Open Work Items
 
-| Item     | Description                            | Status             |
-|----------|----------------------------------------|--------------------|
-| W38      | C-compiled SIMD perf (Lazy AOT path)   | Research complete   |
-| Phase 18 | Lazy Compilation + CLI Extensions      | Aligns with W38    |
+| Item     | Description                                       | Status         |
+|----------|---------------------------------------------------|----------------|
+| W41      | JIT real-world correctness (6 programs, T=3 露出)  | New            |
+| W42      | wasmtime 互換性差異 (3 Go programs, JIT 無関係)     | New            |
+| Phase 18 | Lazy Compilation + CLI Extensions                 | Future         |
 
 ## Completed Phases (summary)
 

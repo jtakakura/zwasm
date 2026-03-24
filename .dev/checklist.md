@@ -10,42 +10,37 @@ Prefix: W## (to distinguish from CW's F## items).
 
 ## Open Items
 
-- [ ] W38: SIMD JIT — compiler-generated code performance
-  C compiler (`wasm32-wasi-clang -O2 -msimd128`) patterns are much slower than
-  hand-written WAT. Gap vs wasmtime: microbench 1.2-3.8x, C-generated 13-131x.
+- [x] W38: SIMD JIT — compiler-generated code performance (2026-03-24)
+  **Resolved via Lazy AOT approach** on branch `perf/w38-lazy-aot`:
+  - HOT_THRESHOLD 10 → 3: earlier JIT compilation
+  - `back_edge_bailed` flag: reentry guard bail no longer poisons call-path JIT
+  - ARM64 extract_lane encoding fix (imm5 shift + upper-half memory load)
+  - JIT memory_grow64 u32 → u64 (memory64 `-1` return fix)
+  - JIT trampoline cross-module instance fix (callee's instance, not caller's)
+  - Spec: 62,263/62,263 (100%). Benchmarks: no regression.
 
-  **Root cause identified**: C-compiled functions have reentry guards (`__cxa_atexit`
-  init pattern) that prevent back-edge JIT. The hot loop runs entirely in the
-  interpreter (register IR), which is 13-131x slower than wasmtime's JIT.
+- [ ] W41: JIT real-world correctness — OOB/wrong results at HOT_THRESHOLD=3
+  6 real-world programs produce wrong JIT output (correct with `--interp`):
+  - `rust_compression`: OOB at test 2 (**T=10 でも再現、back-edge JIT バグ**)
+  - `rust_enum_match`: float formatting garbage (T=3 で露出)
+  - `rust_serde_json`: OOB (T=3 で露出)
+  - `tinygo_hello`: OOB (T=3 で露出)
+  - `tinygo_json`: OOB (T=3 で露出)
+  - `tinygo_sort`: 出力差異 (T=3 で露出)
+  Spec tests (62,263) all pass — these are code patterns spec tests don't cover.
+  Likely root cause: JIT codegen for complex Rust/Go/TinyGo patterns (large
+  functions, complex control flow, specific memory access patterns).
 
-  **Investigation progress** (2026-03-24):
-  1. ~~JIT bail for reentry guard~~ — identified as the primary cause.
-     OSR (On-Stack Replacement) can bypass the guard, but has v128 state sync
-     issues: SIMD accumulator values don't transfer correctly from interpreter
-     to JIT when vregs carry interleaved scalar/SIMD values.
-  2. **v128 sync fix applied**: ARM64 JIT now copies simd_v128 in MOV and clears
-     in CONST32/CONST64 (matches x86 backend). This is a correctness fix for
-     existing SIMD JIT, not yet sufficient for OSR.
-  3. **OSR blocker**: The JIT's SIMD v128 state at OSR entry doesn't match
-     the interpreter's state for complex C functions. Needs deeper analysis of
-     how the JIT's native SIMD path interacts with scalar register reuse across
-     MOV chains. The x86 backend has the same limitation.
-
-  **Next steps**:
-  - Investigate alternative to OSR: function splitting (compile only the loop body)
-  - Or: fix v128 state transfer for OSR (needs tracking of which vregs carry v128
-    at each PC, and proper state marshaling at OSR entry)
-  - replace_lane fusion (independent optimization, lower priority)
-
-  **Key data**: `bench/simd_comparison.yaml` (3 layers: baseline → post-opt → JIT)
-  **Benchmark sources**: `bench/simd/src/` (grayscale.c, box_blur.c, sum_reduce.c,
-  byte_freq.c, nbody_simd.c). Build: `bash bench/simd/build_simd_bench.sh`
-  **Microbench WAT**: `bench/simd/` (dot_product.wat, matrix_mul.wat, etc.)
-  **Run**: `bash bench/run_simd_bench.sh [--quick]`
+- [ ] W42: wasmtime 互換性差異 (JIT 無関係)
+  3 Go programs produce different output from wasmtime (same in interp and JIT):
+  - `go_crypto_sha256`, `go_math_big`, `go_regex`
+  Likely Go runtime behavior differences (env, args, or WASI capability gaps).
 
 ## Resolved (summary)
 
 W37: Contiguous v128 storage. W39: Multi-value return JIT (guard removed).
 W40: Epoch-based JIT timeout (D131).
+W38: SIMD JIT C-compiled perf — Lazy AOT (HOT_THRESHOLD 10→3, back_edge_bailed,
+     extract_lane fix, memory_grow64 fix, cross-module instance fix).
 
 W2-W36: See git history. All resolved through Stages 0-47 and Phases 1-19.

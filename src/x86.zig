@@ -189,6 +189,13 @@ const Enc = struct {
         buf.append(alloc, modrmReg(src, dst)) catch {};
     }
 
+    /// MOV r64, r64 (REX.W prefix for 64-bit operand)
+    fn movRegReg64(buf: *std.ArrayList(u8), alloc: Allocator, dst: Reg, src: Reg) void {
+        buf.append(alloc, rex(true, src.isExt(), false, dst.isExt())) catch {};
+        buf.append(alloc, 0x89) catch {};
+        buf.append(alloc, modrmReg(src, dst)) catch {};
+    }
+
     /// MOV r64, imm64 (10 bytes): REX.W B8+rd io
     fn movImm64(buf: *std.ArrayList(u8), alloc: Allocator, dst: Reg, imm: u64) void {
         buf.append(alloc, rexW1(dst)) catch {};
@@ -330,6 +337,14 @@ const Enc = struct {
     /// CMP r64, imm8 (sign-extended): REX.W 83 /7 ib
     fn cmpImm8(buf: *std.ArrayList(u8), alloc: Allocator, reg: Reg, imm: i8) void {
         buf.append(alloc, rexW1(reg)) catch {};
+        buf.append(alloc, 0x83) catch {};
+        buf.append(alloc, modrm(0b11, 7, reg.low3())) catch {};
+        buf.append(alloc, @bitCast(imm)) catch {};
+    }
+
+    /// CMP r/m32, imm8 (sign-extended to 32 bits)
+    fn cmpImm8_32(buf: *std.ArrayList(u8), alloc: Allocator, reg: Reg, imm: i8) void {
+        if (reg.isExt()) buf.append(alloc, rex(false, false, false, true)) catch {};
         buf.append(alloc, 0x83) catch {};
         buf.append(alloc, modrm(0b11, 7, reg.low3())) catch {};
         buf.append(alloc, @bitCast(imm)) catch {};
@@ -2809,7 +2824,7 @@ pub const Compiler = struct {
         self.spillCallerSaved();
         const pages_reg = self.getOrLoad(instr.rs1, SCRATCH);
         if (builtin.os.tag == .windows) {
-            Enc.movRegReg32(&self.code, self.alloc, .rdx, pages_reg);
+            Enc.movRegReg64(&self.code, self.alloc, .rdx, pages_reg);
             self.emitLoadInstPtr(.rcx);
             const frame_bytes = self.emitWindowsCallSetup(0);
             self.emitLoadImm64(SCRATCH, self.mem_grow_addr);
@@ -2817,12 +2832,12 @@ pub const Compiler = struct {
             Enc.addImm32(&self.code, self.alloc, .rsp, @intCast(frame_bytes));
         } else {
             // Load pages BEFORE clobbering RDI — value may be in RDI (vreg 4)
-            Enc.movRegReg32(&self.code, self.alloc, .rsi, pages_reg);
+            Enc.movRegReg64(&self.code, self.alloc, .rsi, pages_reg);
             self.emitLoadInstPtr(.rdi);
             self.emitLoadImm64(SCRATCH, self.mem_grow_addr);
             Enc.callReg(&self.code, self.alloc, SCRATCH);
         }
-        // Result in EAX (u32): old_pages or 0xFFFFFFFF
+        // Result in RAX (u64): old_pages or fail value
         // Store result to regs[rd] immediately (before RAX is clobbered)
         const rd_disp: i32 = @as(i32, instr.rd) * 8;
         Enc.storeDisp32(&self.code, self.alloc, REGS_PTR, rd_disp, .rax);
@@ -6529,17 +6544,19 @@ pub const Compiler = struct {
         // Signed division edge cases for divisor == -1:
         // - div: INT_MIN / -1 → IntegerOverflow trap (x86 IDIV raises SIGFPE)
         // - rem: N % -1 = 0 always; skip IDIV to avoid SIGFPE on INT_MIN
+        // Use 32-bit CMP: i32(-1) is stored as 0x00000000FFFFFFFF in 64-bit reg,
+        // so 64-bit CMP with sign-extended -1 (0xFFFFFFFFFFFFFFFF) would fail.
         var rem_done_off: ?u32 = null;
         if (signed) {
             if (!is_rem) {
-                Enc.cmpImm8(&self.code, self.alloc, divisor, -1);
+                Enc.cmpImm8_32(&self.code, self.alloc, divisor, -1);
                 const skip_off = Enc.jccRel32(&self.code, self.alloc, .ne);
                 Enc.cmpImm32(&self.code, self.alloc, r1, 0x80000000);
                 self.emitCondError(.e, 4); // error code 4 = IntegerOverflow
                 Enc.patchRel32(self.code.items, skip_off, self.currentOffset());
             } else {
                 // rem_s: if divisor == -1, result is 0 — skip IDIV entirely
-                Enc.cmpImm8(&self.code, self.alloc, divisor, -1);
+                Enc.cmpImm8_32(&self.code, self.alloc, divisor, -1);
                 const ne_off = Enc.jccRel32(&self.code, self.alloc, .ne);
                 Enc.xorRegReg32(&self.code, self.alloc, .rax, .rax);
                 self.storeVreg(instr.rd, .rax);
