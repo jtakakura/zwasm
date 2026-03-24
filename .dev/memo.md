@@ -14,24 +14,10 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-**W38 Lazy AOT — merge gate** on branch `perf/w38-lazy-aot`.
+**W38 merged to main** — Lazy AOT + JIT correctness fixes.
 
-### Changes
-
-- HOT_THRESHOLD 10 → 3: earlier JIT compilation
-- `back_edge_bailed` flag: reentry guard/br_table bail separated from `jit_failed`
-- ARM64 extract_lane: imm5 shift fix + upper-half lane memory load
-- JIT `jitMemGrow`: u32 → u64 for memory64 `-1` return
-- JIT trampoline: cross-module call passes callee's instance (not caller's)
-- Tests: force_interpreter for fuel/deadline/memory resource tests
-
-### Gate Status
-
-- `zig build test`: all pass
-- Spec: **62,263/62,263 (100%)**
-- E2E: 792/792
-- Real-world: 41/50 (6 JIT bugs → W41, 3 wasmtime diffs → W42)
-- Benchmarks: no regression
+- HOT_THRESHOLD 10 → 3, back_edge_bailed, extract_lane fix
+- jitMemGrow u64, cross-module instance fix, x86 div/rem_s -1 fix
 
 ### Open Work Items
 
