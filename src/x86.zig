@@ -2653,7 +2653,7 @@ pub const Compiler = struct {
 
     /// Emit inline self-call: bypass trampoline, call directly to self_call_entry.
     /// Handles: spill, reg_ptr advance, arg copy, call_depth, CALL, restore.
-    fn emitInlineSelfCall(self: *Compiler, rd: u16, data: RegInstr, data2: ?RegInstr, _: []const RegInstr, _: u32) void {
+    fn emitInlineSelfCall(self: *Compiler, rd: u16, n_results: u16, data: RegInstr, data2: ?RegInstr, _: []const RegInstr, _: u32) void {
         const needed: u32 = @as(u32, self.reg_count) + 4; // +4: mem cache + VM/inst ptrs
         const needed_bytes: u32 = needed * 8;
         const n_args = self.param_count;
@@ -2777,7 +2777,7 @@ pub const Compiler = struct {
         // 14. Copy callee's result (regs[0] at R12+needed_bytes) to caller's rd slot.
         // The callee's epilogue stored result in callee's regs[0].
         // After R12 restore, callee frame starts at R12 + needed_bytes.
-        if (self.result_count > 0) {
+        if (n_results > 0) {
             Enc.loadDisp32(&self.code, self.alloc, SCRATCH, REGS_PTR, @intCast(needed_bytes));
             const rd_disp: i32 = @as(i32, rd) * 8;
             Enc.storeDisp32(&self.code, self.alloc, REGS_PTR, rd_disp, SCRATCH);
@@ -5938,10 +5938,10 @@ pub const Compiler = struct {
                     data2 = ir[pc.*];
                     pc.* += 1;
                 }
+                const n_results: u16 = instr.rs2_field;
                 if (self.has_self_call and func_idx == self.self_func_idx) {
-                    self.emitInlineSelfCall(instr.rd, data, if (has_data2) data2 else null, ir, call_pc);
+                    self.emitInlineSelfCall(instr.rd, n_results, data, if (has_data2) data2 else null, ir, call_pc);
                 } else {
-                    const n_results: u16 = instr.rs2_field;
                     self.emitCall(instr.rd, func_idx, n_args, n_results, data, if (has_data2) data2 else null, ir, call_pc);
                 }
             },
