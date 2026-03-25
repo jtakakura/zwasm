@@ -51,6 +51,9 @@ pub const jit_mod = if (build_options.enable_jit) @import("jit.zig") else struct
     pub fn getUseGuardPages(_: anytype) bool {
         return false;
     }
+    pub fn getPageSizeLog2(_: anytype) u5 {
+        return 16;
+    }
     pub fn compileFunction(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) ?*JitCode {
         return null;
     }

@@ -6989,7 +6989,7 @@ test "x86_64 compile and execute constant return" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7015,7 +7015,7 @@ test "x86_64 compile and execute i32 add" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7048,7 +7048,7 @@ test "x86_64 compile and execute branch (LE_S + BR_IF_NOT)" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7098,7 +7098,7 @@ test "x86_64 compile and execute loop (simple counter)" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 1, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 1, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7158,7 +7158,7 @@ test "x86_64 compile and execute memory load" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 1, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 1, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7220,7 +7220,7 @@ test "x86_64 compile and execute memory store then load" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7250,7 +7250,7 @@ test "x86_64 compile and execute f64 add" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 2, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7295,11 +7295,11 @@ test "x86_64 CMP+Jcc fusion saves instructions per compare-and-branch" {
     var reg_func = RegFunc{ .code = &code, .pool64 = &.{}, .reg_count = 4, .local_count = 2, .alloc = alloc };
     var reg_func_nofuse = RegFunc{ .code = &code_nofuse, .pool64 = &.{}, .reg_count = 4, .local_count = 2, .alloc = alloc };
 
-    const jit_fused = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_fused = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_fused.deinit(alloc);
 
-    const jit_nofuse = compileFunction(alloc, &reg_func_nofuse, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_nofuse = compileFunction(alloc, &reg_func_nofuse, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_nofuse.deinit(alloc);
 
@@ -7340,7 +7340,7 @@ test "x86_64 unreachable opcode emits trap error" {
         .{ .op = regalloc_mod.OP_RETURN, .rd = 1, .rs1 = 0, .operand = 0 },
     };
     var rf = RegFunc{ .code = &code, .pool64 = &.{}, .reg_count = 4, .local_count = 2, .alloc = alloc };
-    const jit_code = compileFunction(alloc, &rf, &.{}, 0, 1, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &rf, &.{}, 0, 1, 1, null, 0, false, null, 16) orelse
         return error.SkipZigTest;
     defer jit_code.deinit(alloc);
 
