@@ -7,7 +7,7 @@ Session handover document. Read at session start.
 - Stages 0-46 + Phase 1, 3, 5, 8, 10, 11, 13, 15, 19, **20 (partial)** complete.
 - Spec: 62,263/62,263 Mac+Ubuntu (100.0%, 0 skip).
 - E2E: 792/792 (Mac+Ubuntu).
-- Real-world: Mac 48/50 (tinygo_sort fixed), Ubuntu TBD (pending merge gate).
+- Real-world: Mac 48/50, Ubuntu 50/50. Merged to main 2026-03-25.
 - JIT: Register IR + ARM64/x86_64 + SIMD (NEON 253/256, SSE 244/256).
 - HOT_THRESHOLD=3 (lowered from 10 in W38).
 - Binary: 1.29MB stripped. Memory: ~3.5MB RSS.
@@ -18,7 +18,7 @@ Session handover document. Read at session start.
 
 **Phase 20: JIT Correctness Sweep — remaining W41 bugs**
 
-Branch: `phase20/tinygo-sort-fix`. tinygo_sort FIXED, ready for merge gate.
+All Phase 20 fixes merged to main (2026-03-25). Merge Gate passed (Mac + Ubuntu).
 
 ### Completed fixes (all Phase 20)
 
@@ -77,9 +77,8 @@ Fix: use SCRATCH2 (x16/IP0) instead of x0. x86 backend was already correct
 8. **Merge gate checklist**: CLAUDE.md → "Merge Gate Checklist" section
 
 ### Key next tasks
-- **W41 tinygo_sort**: func#87 (89 regs). Approach: capstone disassembly, runtime
-  memory comparison, or reg_count bisection 50-89. See checklist for details.
-- **W41 rust_enum_match**: FP JIT bug. Separate investigation.
+- **W41 rust_enum_match**: FP JIT bug (garbage f64 in Triangle coords). Mac only.
+- **W42 go_math_big**: env-dependent, low priority.
 
 ## References
 

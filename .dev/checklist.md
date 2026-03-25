@@ -18,7 +18,7 @@ Prefix: W## (to distinguish from CW's F## items).
   - `rust_enum_match`: garbage f64 in Triangle coords
     - FP-related JIT bug, needs separate investigation
 
-  **Ubuntu:** TBD (re-test after merge)
+  **Ubuntu:** 50/50 PASS (merge gate 2026-03-25)
 
 - [ ] W42: wasmtime 互換性差異 (JIT 無関係)
   go_math_big — crashes with `environ_sizes_get failed` (same in interp and JIT).
