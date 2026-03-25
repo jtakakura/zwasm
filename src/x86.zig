@@ -1699,6 +1699,8 @@ pub const Compiler = struct {
     min_memory_bytes: u32,
     known_consts: [128]?u32,
     written_vregs: u128,
+    /// Bitset of vregs that hold v128 values (produced by SIMD ops with v128 result).
+    v128_vregs: u128,
     scratch_vreg: ?u16,
     /// Offset of Vm.simd_v128 field (contiguous v128 storage).
     simd_v128_offset: u32,
@@ -1768,6 +1770,7 @@ pub const Compiler = struct {
             .min_memory_bytes = 0,
             .known_consts = .{null} ** 128,
             .written_vregs = 0,
+            .v128_vregs = 0,
             .scratch_vreg = null,
             .simd_v128_offset = 0,
             .has_simd = false,
@@ -3835,6 +3838,14 @@ pub const Compiler = struct {
                 // The x86 backend's original tracking set the bit unconditionally.
                 // This is slightly conservative (marks control-flow ops too) but safe.
                 self.written_vregs |= @as(u128, 1) << @as(u7, @intCast(scan_instr.rd));
+                // Track v128-producing SIMD ops for register class allocation
+                const op = scan_instr.op;
+                if (op >= predecode_mod.SIMD_BASE and op <= predecode_mod.SIMD_BASE + 0x113) {
+                    const sub = op - predecode_mod.SIMD_BASE;
+                    if (predecode_mod.simdResultIsV128(sub)) {
+                        self.v128_vregs |= @as(u128, 1) << @as(u7, @intCast(scan_instr.rd));
+                    }
+                }
             }
         }
 
