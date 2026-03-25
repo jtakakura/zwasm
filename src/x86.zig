@@ -1704,6 +1704,7 @@ pub const Compiler = struct {
     simd_v128_offset: u32,
     /// True when the function uses SIMD opcodes (skip simd_v128 handling if false).
     has_simd: bool,
+    page_size_log2: u5,
     /// Address of jitSimdTrampoline function.
     simd_trampoline_addr: u64,
     /// Address of Vm.jitFuelCheckHelper for deadline/fuel checks.
@@ -1770,6 +1771,7 @@ pub const Compiler = struct {
             .scratch_vreg = null,
             .simd_v128_offset = 0,
             .has_simd = false,
+            .page_size_log2 = 16,
             .simd_trampoline_addr = 0,
             .fuel_check_helper_addr = 0,
             .use_guard_pages = false,
@@ -2416,16 +2418,14 @@ pub const Compiler = struct {
         self.scratch_vreg = null;
     }
 
-    /// Emit memory.size: rd = memory pages (MEM_SIZE / 65536)
+    /// Emit memory.size: rd = memory pages (MEM_SIZE >> page_size_log2)
     fn emitMemorySize(self: *Compiler, instr: RegInstr) void {
-        // SHR R14_copy, 16 → pages
         Enc.movRegReg(&self.code, self.alloc, SCRATCH, MEM_SIZE);
-        // SHR RAX, 16 — need shift by immediate
         // SHR r64, imm8: REX.W C1 /5 ib
         self.code.append(self.alloc, Enc.rexW1(SCRATCH)) catch {};
         self.code.append(self.alloc, 0xC1) catch {};
         self.code.append(self.alloc, Enc.modrm(3, 5, SCRATCH.low3())) catch {};
-        self.code.append(self.alloc, 16) catch {};
+        self.code.append(self.alloc, self.page_size_log2) catch {};
         self.storeVreg(instr.rd, SCRATCH);
     }
 
@@ -6824,6 +6824,7 @@ pub fn compileFunction(
     min_memory_bytes: u32,
     use_guard_pages: bool,
     osr_target_pc: ?u32,
+    page_size_log2: u5,
 ) ?*JitCode {
     if (builtin.cpu.arch != .x86_64) return null;
     _ = trace;
@@ -6842,6 +6843,7 @@ pub fn compileFunction(
     var compiler = Compiler.init(alloc);
     compiler.use_guard_pages = use_guard_pages;
     compiler.osr_target_pc = osr_target_pc;
+    compiler.page_size_log2 = page_size_log2;
     compiler.jit_fuel_offset = @intCast(@offsetOf(vm_mod.Vm, "jit_fuel"));
     compiler.simd_v128_offset = @intCast(@offsetOf(vm_mod.Vm, "simd_v128"));
     compiler.simd_trampoline_addr = @intFromPtr(&vm_mod.Vm.jitSimdTrampoline);

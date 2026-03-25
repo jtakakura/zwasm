@@ -1089,6 +1089,8 @@ pub const Compiler = struct {
     jit_fuel_offset: u32,
     simd_v128_offset: u32,
     min_memory_bytes: u32,
+    /// Log2 of memory page size (16 for standard 65536, 0 for custom page_size=1).
+    page_size_log2: u5,
     /// Bitmask of vregs that need loading in the prologue.
     /// Bit N = 1 means vreg N is read before written and must be loaded.
     prologue_load_mask: u32,
@@ -1197,6 +1199,7 @@ pub const Compiler = struct {
             .jit_fuel_offset = 0,
             .simd_v128_offset = 0,
             .min_memory_bytes = 0,
+            .page_size_log2 = 16,
             .prologue_load_mask = 0xFFFFF, // default: load all (20 vregs)
             .known_consts = .{null} ** 128,
             .written_vregs = 0,
@@ -3116,9 +3119,9 @@ pub const Compiler = struct {
 
             // --- Memory size/grow ---
             0x3F => { // memory.size: rd = memory pages
-                // MEM_SIZE (x28) = memory size in bytes.  pages = bytes >> 16 (PAGE_SIZE=65536)
+                // MEM_SIZE (x28) = memory size in bytes.  pages = bytes >> page_size_log2
                 const d = self.destRegEff(instr.rd);
-                self.emit(a64.lsr64Imm(d, MEM_SIZE, 16));
+                self.emit(a64.lsr64Imm(d, MEM_SIZE, self.page_size_log2));
                 self.storeVreg(instr.rd, d);
             },
             0x40 => { // memory.grow: rd = old_pages | -1
@@ -7292,19 +7295,24 @@ pub fn jitMemGrow(instance_opaque: *anyopaque, pages: u64) callconv(.c) u64 {
 
 /// JIT helper: memory.fill — fill memory[dst..dst+n] with val.
 /// Returns 0 on success, 1 on out-of-bounds.
-pub fn jitMemFill(instance_opaque: *anyopaque, dst: u32, val: u32, n: u32) callconv(.c) u32 {
+pub fn jitMemFill(instance_opaque: *anyopaque, dst: u64, val: u64, n: u64) callconv(.c) u32 {
     const instance: *Instance = @ptrCast(@alignCast(instance_opaque));
     const m = instance.getMemory(0) catch return 1;
-    m.fill(dst, n, @truncate(val)) catch return 1;
+    const dst32 = std.math.cast(u32, dst) orelse return 1;
+    const n32 = std.math.cast(u32, n) orelse return 1;
+    m.fill(dst32, n32, @truncate(val)) catch return 1;
     return 0;
 }
 
 /// JIT helper: memory.copy — copy memory[src..src+n] to memory[dst..dst+n].
 /// Returns 0 on success, 1 on out-of-bounds.
-pub fn jitMemCopy(instance_opaque: *anyopaque, dst: u32, src: u32, n: u32) callconv(.c) u32 {
+pub fn jitMemCopy(instance_opaque: *anyopaque, dst: u64, src: u64, n: u64) callconv(.c) u32 {
     const instance: *Instance = @ptrCast(@alignCast(instance_opaque));
     const m = instance.getMemory(0) catch return 1;
-    m.copyWithin(dst, src, n) catch return 1;
+    const dst32 = std.math.cast(u32, dst) orelse return 1;
+    const src32 = std.math.cast(u32, src) orelse return 1;
+    const n32 = std.math.cast(u32, n) orelse return 1;
+    m.copyWithin(dst32, src32, n32) catch return 1;
     return 0;
 }
 
@@ -7329,6 +7337,11 @@ pub fn getUseGuardPages(instance: *Instance) bool {
     return mem.hasGuardPages();
 }
 
+pub fn getPageSizeLog2(instance: *Instance) u5 {
+    const mem = instance.getMemory(0) catch return 16;
+    return std.math.log2_int(u32, mem.page_size);
+}
+
 /// param_count: number of parameters for the function.
 /// osr_target_pc: if non-null, emit an OSR entry that jumps to this IR PC
 /// (for back-edge JIT of functions with reentry guards).
@@ -7343,11 +7356,12 @@ pub fn compileFunction(
     min_memory_bytes: u32,
     use_guard_pages: bool,
     osr_target_pc: ?u32,
+    page_size_log2: u5,
 ) ?*JitCode {
     // x86_64 dispatch — delegate to separate backend
     if (builtin.cpu.arch == .x86_64) {
         const x86 = @import("x86.zig");
-        return x86.compileFunction(alloc, reg_func, pool64, self_func_idx, param_count, result_count, trace, min_memory_bytes, use_guard_pages, osr_target_pc);
+        return x86.compileFunction(alloc, reg_func, pool64, self_func_idx, param_count, result_count, trace, min_memory_bytes, use_guard_pages, osr_target_pc, page_size_log2);
     }
 
     if (builtin.cpu.arch != .aarch64) return null;
@@ -7366,6 +7380,7 @@ pub fn compileFunction(
 
     var compiler = Compiler.init(alloc);
     compiler.min_memory_bytes = min_memory_bytes;
+    compiler.page_size_log2 = page_size_log2;
     compiler.use_guard_pages = use_guard_pages;
     compiler.osr_target_pc = osr_target_pc;
     compiler.gc_trampoline_addr = gc_trampoline_addr;
@@ -7472,7 +7487,7 @@ test "compile and execute constant return" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7504,7 +7519,7 @@ test "compile and execute i32 add" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7541,7 +7556,7 @@ test "compile and execute branch (LE_S + BR_IF_NOT)" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7587,7 +7602,7 @@ test "compile and execute i32 division" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7634,7 +7649,7 @@ test "compile and execute i32 remainder" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7671,7 +7686,7 @@ test "remainder with rd == rs1 (aliasing)" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7703,7 +7718,7 @@ test "remainder with rd == rs1 (aliasing)" {
         .local_count = 2,
         .alloc = alloc,
     };
-    const jit64 = compileFunction(alloc, &reg_func64, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit64 = compileFunction(alloc, &reg_func64, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit64.deinit(alloc);
 
@@ -7772,7 +7787,7 @@ test "compile and execute memory load/store" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7836,7 +7851,7 @@ test "compile and execute memory store then load" {
         .alloc = alloc,
     };
 
-    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_code = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_code.deinit(alloc);
 
@@ -7892,12 +7907,12 @@ test "const-addr memory load elides bounds check" {
     };
 
     // Compile with min_memory_bytes = 65536 (1 page, all const addrs safe)
-    const jit_opt = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 65536, false, null) orelse
+    const jit_opt = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 65536, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_opt.deinit(alloc);
 
     // Compile without optimization (min_memory_bytes = 0)
-    const jit_noopt = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_noopt = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_noopt.deinit(alloc);
 
@@ -7973,11 +7988,11 @@ test "CMP+B.cond fusion saves one instruction per compare-and-branch" {
     var reg_func = RegFunc{ .code = &code, .pool64 = &.{}, .reg_count = 4, .local_count = 2, .alloc = alloc };
     var reg_func_nofuse = RegFunc{ .code = &code_nofuse, .pool64 = &.{}, .reg_count = 4, .local_count = 2, .alloc = alloc };
 
-    const jit_fused = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_fused = compileFunction(alloc, &reg_func, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_fused.deinit(alloc);
 
-    const jit_nofuse = compileFunction(alloc, &reg_func_nofuse, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_nofuse = compileFunction(alloc, &reg_func_nofuse, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_nofuse.deinit(alloc);
 
@@ -8020,11 +8035,11 @@ test "constant materialization uses MOVN for negative values" {
     var rf_neg = RegFunc{ .code = &code_neg, .pool64 = &.{}, .reg_count = 1, .local_count = 1, .alloc = alloc };
     var rf_pos = RegFunc{ .code = &code_pos, .pool64 = &.{}, .reg_count = 1, .local_count = 1, .alloc = alloc };
 
-    const jit_neg = compileFunction(alloc, &rf_neg, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_neg = compileFunction(alloc, &rf_neg, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_neg.deinit(alloc);
 
-    const jit_pos = compileFunction(alloc, &rf_pos, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit_pos = compileFunction(alloc, &rf_pos, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit_pos.deinit(alloc);
 
@@ -8090,7 +8105,7 @@ test "div-by-constant JIT: unsigned i32.div_u by known 10" {
         .{ .op = regalloc_mod.OP_RETURN, .rd = 2, .rs1 = 0, .operand = 0 },
     };
     var rf = RegFunc{ .code = &code, .pool64 = &.{}, .reg_count = 3, .local_count = 1, .alloc = alloc };
-    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit.deinit(alloc);
 
@@ -8113,7 +8128,7 @@ test "div-by-constant JIT: power-of-2 divisor uses LSR" {
         .{ .op = regalloc_mod.OP_RETURN, .rd = 2, .rs1 = 0, .operand = 0 },
     };
     var rf = RegFunc{ .code = &code, .pool64 = &.{}, .reg_count = 3, .local_count = 1, .alloc = alloc };
-    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit.deinit(alloc);
 
@@ -8135,7 +8150,7 @@ test "rem-by-constant JIT: unsigned i32.rem_u by known 10" {
         .{ .op = regalloc_mod.OP_RETURN, .rd = 2, .rs1 = 0, .operand = 0 },
     };
     var rf = RegFunc{ .code = &code, .pool64 = &.{}, .reg_count = 3, .local_count = 1, .alloc = alloc };
-    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit.deinit(alloc);
 
@@ -8157,7 +8172,7 @@ test "rem-by-constant JIT: power-of-2 divisor uses AND" {
         .{ .op = regalloc_mod.OP_RETURN, .rd = 2, .rs1 = 0, .operand = 0 },
     };
     var rf = RegFunc{ .code = &code, .pool64 = &.{}, .reg_count = 3, .local_count = 1, .alloc = alloc };
-    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null) orelse
+    const jit = compileFunction(alloc, &rf, &.{}, 0, 0, 1, null, 0, false, null, 16) orelse
         return error.CompilationFailed;
     defer jit.deinit(alloc);
 

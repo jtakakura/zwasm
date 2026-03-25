@@ -51,7 +51,7 @@ pub const jit_mod = if (build_options.enable_jit) @import("jit.zig") else struct
     pub fn getUseGuardPages(_: anytype) bool {
         return false;
     }
-    pub fn compileFunction(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) ?*JitCode {
+    pub fn compileFunction(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) ?*JitCode {
         return null;
     }
 };
@@ -700,7 +700,7 @@ pub const Vm = struct {
                                     wf.jit_failed = true;
                                     if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "too many IR instrs — skip JIT");
                                 } else {
-                                    wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(func_ptr.params.len), @intCast(func_ptr.results.len), self.trace, jit_mod.getMinMemoryBytes(inst), jit_mod.getUseGuardPages(inst), null);
+                                    wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(func_ptr.params.len), @intCast(func_ptr.results.len), self.trace, jit_mod.getMinMemoryBytes(inst), jit_mod.getUseGuardPages(inst), null, jit_mod.getPageSizeLog2(inst));
                                     if (wf.jit_code == null) {
                                         wf.jit_failed = true;
                                         if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "compilation failed");
@@ -4453,6 +4453,7 @@ pub const Vm = struct {
         min_memory_bytes: u32,
         use_guard_pages: bool,
         back_edge_target: u32,
+        page_size_log2: u5,
     ) WasmError!void {
         count.* += 1;
         if (count.* == jit_mod.BACK_EDGE_THRESHOLD) {
@@ -4481,7 +4482,7 @@ pub const Vm = struct {
             // or corrupt stack pointer. Use OSR to enter at the loop body instead.
             const use_osr = hasPrologueSideEffects(reg.code, back_edge_target);
             const osr_pc: ?u32 = if (use_osr) back_edge_target else null;
-            wf.jit_code = jit_mod.compileFunction(alloc, reg, pool64, wf.func_idx, param_count, result_count, trace, min_memory_bytes, use_guard_pages, osr_pc);
+            wf.jit_code = jit_mod.compileFunction(alloc, reg, pool64, wf.func_idx, param_count, result_count, trace, min_memory_bytes, use_guard_pages, osr_pc, page_size_log2);
             if (wf.jit_code != null) {
                 if (trace) |tc| trace_mod.traceJitBackEdge(tc, wf.func_idx, @intCast(reg.code.len), @intCast(wf.jit_code.?.buf.len));
                 return error.JitRestart;
@@ -4575,6 +4576,7 @@ pub const Vm = struct {
         const jit_result_count: u16 = @intCast(func_ptr.results.len);
         const jit_min_mem_bytes: u32 = jit_mod.getMinMemoryBytes(instance);
         const jit_use_guard_pages: bool = jit_mod.getUseGuardPages(instance);
+        const jit_page_size_log2: u5 = jit_mod.getPageSizeLog2(instance);
 
         while (pc < code_len) {
             const instr = code[pc];
@@ -4609,14 +4611,14 @@ pub const Vm = struct {
                 // ---- Control flow ----
                 regalloc_mod.OP_BR => {
                     if (jit_eligible and instr.operand < pc)
-                        try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, instr.operand);
+                        try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, instr.operand, jit_page_size_log2);
                     pc = instr.operand;
                 },
 
                 regalloc_mod.OP_BR_IF => {
                     if (regs[instr.rd] != 0) {
                         if (jit_eligible and instr.operand < pc)
-                            try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, instr.operand);
+                            try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, instr.operand, jit_page_size_log2);
                         pc = instr.operand;
                     }
                 },
@@ -4624,7 +4626,7 @@ pub const Vm = struct {
                 regalloc_mod.OP_BR_IF_NOT => {
                     if (regs[instr.rd] == 0) {
                         if (jit_eligible and instr.operand < pc)
-                            try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, instr.operand);
+                            try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, instr.operand, jit_page_size_log2);
                         pc = instr.operand;
                     }
                 },
@@ -5448,7 +5450,7 @@ pub const Vm = struct {
                     const target_entry = if (idx < count) idx else count; // default is last
                     const target_pc = code[pc + target_entry].operand;
                     if (jit_eligible and target_pc < pc)
-                        try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, target_pc);
+                        try checkBackEdgeJit(&back_edge_count, wf.?, self.alloc, reg, pool64, jit_param_count, jit_result_count, self.trace, jit_min_mem_bytes, jit_use_guard_pages, target_pc, jit_page_size_log2);
                     pc = target_pc;
                     continue;
                 },
@@ -7075,7 +7077,7 @@ pub const Vm = struct {
                                         if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "too many IR instrs — skip JIT");
                                     } else {
                                         const jit_inst: *Instance = @ptrCast(@alignCast(wf.instance));
-                                        wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(current_fp.params.len), @intCast(current_fp.results.len), self.trace, jit_mod.getMinMemoryBytes(jit_inst), jit_mod.getUseGuardPages(jit_inst), null);
+                                        wf.jit_code = jit_mod.compileFunction(self.alloc, reg, wf.ir.?.pool64, wf.func_idx, @intCast(current_fp.params.len), @intCast(current_fp.results.len), self.trace, jit_mod.getMinMemoryBytes(jit_inst), jit_mod.getUseGuardPages(jit_inst), null, jit_mod.getPageSizeLog2(jit_inst));
                                         if (wf.jit_code == null) {
                                             wf.jit_failed = true;
                                             if (self.trace) |tc| trace_mod.traceJitBail(tc, wf.func_idx, "compilation failed");
