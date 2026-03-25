@@ -7,7 +7,7 @@ Session handover document. Read at session start.
 - Stages 0-46 + Phase 1, 3, 5, 8, 10, 11, 13, 15, 19, **20 (partial)** complete.
 - Spec: 62,263/62,263 Mac+Ubuntu (100.0%, 0 skip).
 - E2E: 792/792 (Mac+Ubuntu).
-- Real-world: Mac 49/50, Ubuntu 50/50. rust_enum_match fixed 2026-03-25.
+- Real-world: Mac 50/50, Ubuntu 50/50. go_math_big fixed 2026-03-25.
 - JIT: Register IR + ARM64/x86_64 + SIMD (NEON 253/256, SSE 244/256).
 - HOT_THRESHOLD=3 (lowered from 10 in W38).
 - Binary: 1.29MB stripped. Memory: ~3.5MB RSS.
@@ -19,6 +19,7 @@ Session handover document. Read at session start.
 **Phase 20: JIT Correctness Sweep — remaining W41 bugs**
 
 All Phase 20 fixes merged to main (2026-03-25). Merge Gate passed (Mac + Ubuntu).
+**Remainder aliasing fix** added 2026-03-25 (this branch). Mac 50/50.
 
 ### Completed fixes (all Phase 20)
 
@@ -27,28 +28,30 @@ All Phase 20 fixes merged to main (2026-03-25). Merge Gate passed (Mac + Ubuntu)
 | void-call reloadVreg (ARM64 + x86)               | +5 Mac programs           |
 | ARM64 emitMemFill/emitMemCopy/emitMemGrow ABI    | ARM64 memory ops          |
 | written_vregs pre-scan (ARM64 + x86)             | +2 Mac (tinygo_hello/json) |
-| void self-call result clobber (ARM64 + x86)      | Preventive fix             |
-| **ARM64 fuel check x0 clobber** (this branch)    | **tinygo_sort FIXED**      |
-| **Stale scratch cache in signed div** (this branch) | **rust_enum_match FIXED** |
+| void self-call result clobber (ARM64 + x86)      | Preventive fix            |
+| ARM64 fuel check x0 clobber                      | tinygo_sort FIXED         |
+| Stale scratch cache in signed div                | rust_enum_match FIXED     |
+| **Remainder rd==rs1 aliasing** (this branch)     | **go_math_big FIXED**     |
 
-**Root cause — stale scratch cache in emitDiv32/emitDiv64**: The signed
-division overflow check (INT_MIN / -1) uses SCRATCH (x8) for temporary
-values (-1 and INT_MIN) but did not invalidate `scratch_vreg`. After the
-check, `getOrLoad()` returned the stale SCRATCH instead of reloading.
-This caused wrong exponent computation in the Grisu float-to-decimal
-function (func#185, 52 vregs), producing garbage f64 formatting output.
-Fix: `self.scratch_vreg = null` before the overflow check.
+**Root cause — remainder register aliasing in emitRem32/emitRem64**: When
+rd == rs1 (same physical register), UDIV/SDIV overwrites the original
+dividend before MSUB can use it as the Xa operand. MSUB then computes
+`quo - quo * divisor` instead of `dividend - quo * divisor`.
+This caused Go's `math/bits.Div64` to return remainder=0 in the hi==0
+fast path (where i64.rem_u has rd==rs1), making big integer decimal
+conversion produce truncated output (e.g. 2^100 showed 19 digits
+instead of 31). Fix: save rs1 to SCRATCH before division when d==rs1.
 
 ### Remaining
 
-- W42: `go_math_big` wasmtime compat diff (env-dependent, not JIT-related)
+- W42: go_math_big was NOT env-dependent — it was this JIT bug! Now PASS.
 
 ### Open Work Items
 
 | Item     | Description                                       | Status         |
 |----------|---------------------------------------------------|----------------|
-| W41      | JIT real-world: ALL FIXED (Mac 49/50)             | **Done**       |
-| W42      | wasmtime 互換性差異 (go_math_big, Mac)             | Low priority   |
+| W41      | JIT real-world: ALL FIXED (Mac 50/50)             | **Done**       |
+| W42      | go_math_big: FIXED (remainder aliasing bug)       | **Done**       |
 | Phase 18 | Lazy Compilation + CLI Extensions                 | Future         |
 
 ## Completed Phases (summary)

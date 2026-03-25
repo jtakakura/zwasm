@@ -15,9 +15,11 @@ Prefix: W## (to distinguish from CW's F## items).
   ARM64 fuel check x0 clobber (tinygo_sort), **stale scratch cache in signed div**
   (rust_enum_match fixed 2026-03-25).
 
-- [ ] W42: wasmtime 互換性差異 (JIT 無関係)
-  go_math_big — crashes with `environ_sizes_get failed` (same in interp and JIT).
-  環境依存: PASS/DIFF が実行環境で変わる。低優先。
+- [x] W42: go_math_big — FIXED (remainder rd==rs1 aliasing in emitRem32/emitRem64)
+  Root cause: NOT env-dependent — was a JIT bug. emitRem used UDIV+MSUB but
+  when rd==rs1, UDIV clobbered the dividend before MSUB could use it.
+  Fix: save rs1 to SCRATCH before division when d aliases rs1.
+  go_math_big now PASS on Mac. Fixed 2026-03-25.
 
 ## Resolved (summary)
 
