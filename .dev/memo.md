@@ -4,7 +4,7 @@ Session handover document. Read at session start.
 
 ## Current State
 
-- Stages 0-46 + Phase 1, 3, 5, 8, 10, 11, 13, 15, 19, **20 (partial)** complete.
+- Stages 0-46 + Phase 1, 3, 5, 8, 10, 11, 13, 15, 19, **20** complete.
 - Spec: 62,263/62,263 Mac+Ubuntu (100.0%, 0 skip).
 - E2E: 792/792 (Mac+Ubuntu).
 - Real-world: Mac 50/50, Ubuntu 50/50. go_math_big fixed 2026-03-25.
@@ -42,17 +42,14 @@ fast path (where i64.rem_u has rd==rs1), making big integer decimal
 conversion produce truncated output (e.g. 2^100 showed 19 digits
 instead of 31). Fix: save rs1 to SCRATCH before division when d==rs1.
 
-### Remaining
-
-- W42: go_math_big was NOT env-dependent — it was this JIT bug! Now PASS.
-
 ### Open Work Items
 
-| Item     | Description                                       | Status         |
-|----------|---------------------------------------------------|----------------|
-| W41      | JIT real-world: ALL FIXED (Mac 50/50)             | **Done**       |
-| W42      | go_math_big: FIXED (remainder aliasing bug)       | **Done**       |
-| Phase 18 | Lazy Compilation + CLI Extensions                 | Future         |
+| Item       | Description                                       | Status         |
+|------------|---------------------------------------------------|----------------|
+| **W43**    | **SIMD v128 base address cache (D132 Phase A)**   | **Next**       |
+| W44        | SIMD register class (D132 Phase B)                | Future         |
+| Phase 18   | Lazy Compilation + CLI Extensions                 | Future         |
+| Zig 0.16   | API breaking changes                              | When released  |
 
 ## Completed Phases (summary)
 
@@ -67,29 +64,36 @@ instead of 31). Fix: save rs1 to SCRATCH before division when d==rs1.
 | 13       | SIMD JIT (NEON + SSE)                 | 2026-03-23 |
 | 15       | Windows Port                          | 2026-03    |
 | 19       | JIT Reliability                       | 2026-03    |
-| 20 (wip) | JIT Correctness Sweep                 | 2026-03-25 |
+| 20       | JIT Correctness Sweep                 | 2026-03-25 |
 
 ## Next Session Reference Chain
 
 1. **Orient**: `git log --oneline -5 && git status && git branch`
-2. **This memo**: current task, root causes found, remaining bugs
-3. **Checklist**: `@./.dev/checklist.md` — W41 updated with tinygo_sort details
-4. **JIT debug techniques**: `@./.dev/jit-debugging.md` — dump, ELF wrap, objdump
-5. **JIT code** (ARM64): `src/jit.zig` — emitBinop32/64, emitMemStore/Load, getOrLoad, spillCallerSavedLive
-6. **JIT code** (x86): `src/x86.zig` — same patterns
-7. **Ubuntu testing**: `@./.dev/references/ubuntu-testing-guide.md` — OrbStack VM
-8. **Merge gate checklist**: CLAUDE.md → "Merge Gate Checklist" section
+2. **This memo**: current task, open work items
+3. **D132**: `@./.dev/decisions.md` → search `## D132` — SIMD two-phase plan
+   - Phase A (W43): v128 base address cache — implementation plan, register choices
+   - Phase B (W44): SIMD register class — design challenges, deferred
+4. **JIT SIMD code**: `src/jit.zig` → search `emitSimdV128Addr`, `emitLoadV128`,
+   `emitStoreV128`, `emitPrologue`, `has_simd`, `simd_v128_offset`
+5. **x86 SIMD code**: `src/x86.zig` → same patterns
+6. **SIMD benchmarks**: `bench/run_simd_bench.sh`, `bench/simd_comparison.yaml`
+7. **Roadmap**: `@./.dev/roadmap.md` — SIMD register class listed as Medium priority
+8. **Ubuntu testing**: `@./.dev/references/ubuntu-testing-guide.md` — OrbStack VM
+9. **Merge gate checklist**: CLAUDE.md → "Merge Gate Checklist" section
 
-### Key next tasks
-- **W41 rust_enum_match**: FP JIT bug (garbage f64 in Triangle coords). Mac only.
-- **W42 go_math_big**: env-dependent, low priority.
+### Key next task
+- **W43**: SIMD v128 base address cache (D132 Phase A). 2-3 days.
+  ARM64: cache `vm_ptr + simd_v128_offset` in x17 when `has_simd`.
+  Cuts v128 addr computation from 3-4 insns to 1-2.
+  Pattern identical to MEM_BASE/MEM_SIZE caching.
 
 ## References
 
 - `@./.dev/roadmap.md` — Phase roadmap
-- `@./.dev/checklist.md` — W41/W42 details + next steps
-- `@./.dev/references/w38-osr-research.md` — OSR research (4 approaches)
-- `@./.dev/decisions.md` — architectural decisions (D131: epoch JIT timeout)
+- `@./.dev/checklist.md` — resolved work items
+- `@./.dev/decisions.md` — D130 (SIMD arch), D132 (SIMD perf plan)
 - `@./.dev/jit-debugging.md` — JIT debug techniques
+- `@./.dev/references/w38-osr-research.md` — OSR research
 - `bench/simd_comparison.yaml` — SIMD performance data
+- `bench/history.yaml` — benchmark history (latest: phase20-rem-fix)
 - External: wasmtime (`~/Documents/OSS/wasmtime/`), zware (`~/Documents/OSS/zware/`)

@@ -491,3 +491,86 @@ continue JIT) or returns an error code (→ JIT exits to shared epilogue).
 
 **Affected files**: vm.zig (helper, fuel arming), jit.zig (ARM64 stub),
 x86.zig (x86_64 stub).
+
+---
+
+## D132: SIMD Performance — Two-Phase Optimization Plan
+
+**Context**: Phase 13 (SIMD JIT) achieved functional correctness (NEON 253/256,
+SSE 244/256) but SIMD-heavy benchmarks still show large gaps vs wasmtime. Root cause:
+every v128 operation does load-from-memory → NEON/SSE op → store-to-memory, because
+v128 values live in `Vm.simd_v128[512][2]u64` (global array), not in registers.
+
+**Current v128 access cost (ARM64)**:
+Each v128 load/store requires 3-4 instructions for address computation:
+1. Load vm_ptr from `regs[reg_count+2]` (1 insn)
+2. Add `@offsetOf(Vm, simd_v128) + vreg*16` — exceeds imm12 (4095), so 2-3 insns
+3. LDR Q / STR Q (1 insn)
+
+A binary SIMD op (e.g. `i32x4.add`) costs ~11-17 instructions total
+(load×2 + op + store), where 8-14 are pure address computation overhead.
+
+### Phase A: v128 Base Address Cache (W43)
+
+**Decision**: Cache `vm_ptr + @offsetOf(Vm, simd_v128)` in a dedicated register
+during JIT function prologue, so v128 address computation becomes 1-2 instructions
+(ADD scratch, cached_base, vreg*16) instead of 3-4.
+
+**Register allocation**:
+- ARM64: Use x17 (currently vreg 22, last-resort caller-saved). Sacrifice only
+  when `has_simd = true`. Functions with 23 vregs AND SIMD are extremely rare.
+  Define `SIMD_BASE: u5 = 17`. MAX_PHYS_REGS stays 23 but vreg 22 unavailable
+  for SIMD functions.
+- x86: Similar — sacrifice r10 (vreg 9) when `has_simd = true`, or compute
+  from vm_ptr (1 extra load, x86 handles 32-bit immediates natively so less
+  benefit than ARM64).
+
+**Implementation plan**:
+1. Add `simd_base_cached: bool` field to Compiler (both backends)
+2. In `emitPrologue`, when `has_simd`: compute and store base in SIMD_BASE reg
+3. Rewrite `emitSimdV128Addr` to use cached register when available
+4. Ensure OSR prologue also sets up SIMD_BASE (must match normal prologue)
+5. Self-call entry: SIMD_BASE is callee-saved (x17 is caller-saved on ARM64
+   but we don't have self-calls with SIMD in practice; guard if needed)
+6. No spillCallerSaved impact — SIMD_BASE is computed from vm_ptr, not a vreg
+
+**Expected improvement**: ~20-35% code size reduction for SIMD ops on ARM64.
+10-20% wall-clock improvement on SIMD-heavy benchmarks.
+
+**Bug risk**: Low. Pattern identical to MEM_BASE/MEM_SIZE caching.
+Key risk: OSR prologue mismatch (documented pitfall).
+
+**Estimated effort**: 2-3 days.
+
+### Phase B: SIMD Register Class (W44, future)
+
+**Decision**: Add a second register class for v128 values, mapping them to
+Q0-Q31 (ARM64) or XMM0-XMM15 (x86) physical registers. v128 values stay in
+SIMD registers across multiple operations, eliminating load/store traffic.
+
+**Why deferred**: Requires structural changes to regalloc.zig (type tracking,
+new register class), ARM64 FP D-register cache conflicts with Q register
+allocation (D8 is the lower half of Q8), both backends need independent
+implementation, and spill/reload for 128-bit values through calls is error-prone.
+
+**Prerequisites**: Phase A completed, profiling data showing remaining bottleneck
+is load/store traffic (not address computation).
+
+**Key design challenges**:
+1. regalloc.zig: Track scalar vs v128 type per vreg
+2. ARM64: Partition Q regs — Q16-Q31 for v128 (no FP cache conflict),
+   Q2-Q15 for scalar FP cache (existing)
+3. x86: XMM5-XMM15 for v128 (~11 regs), XMM0-XMM2 for scratch
+4. spillCallerSaved: must spill Q/XMM regs to simd_v128[] on calls
+5. Cross-tier compat: interpreter still uses simd_v128[], trampoline must sync
+6. Lane extract/insert: transition between v128 reg class and scalar reg class
+
+**Expected improvement**: 30-50% on SIMD-heavy code. Would close most of the
+gap vs wasmtime for SIMD workloads.
+
+**Bug risk**: High. Touches regalloc, both JIT backends, spill/reload, FP cache.
+
+**Estimated effort**: 3-6 weeks.
+
+**Affected files**: jit.zig, x86.zig (v128 addr, prologue), vm.zig (simd_v128
+offset), regalloc.zig (Phase B only).

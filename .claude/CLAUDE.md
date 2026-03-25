@@ -195,5 +195,6 @@ JIT: `@./.claude/rules/jit-check.md` (auto-loads on jit.zig edits).
 Development: `@./.claude/rules/reliability-work.md` (auto-loads on src/test/bench edits).
 Roadmap: `@./.dev/roadmap.md` (zwasm phases) + `@./private/future/03_zwasm_clojurewasm_roadmap_ja.md` (integrated).
 Allocator injection: `@./.dev/references/allocator-injection-plan.md` — Phase 11 design + task breakdown (D128).
+SIMD performance: `@./.dev/decisions.md` → D132 — two-phase SIMD optimization plan (W43 addr cache, W44 reg class).
 Ubuntu testing: `@./.dev/references/ubuntu-testing-guide.md` — OrbStack VM test commands.
 OrbStack setup: `@./.dev/references/setup-orbstack.md` — VM creation and tool installation.
