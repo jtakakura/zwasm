@@ -48,26 +48,41 @@ Q-reg/XMM cache now persists across loop iterations. Three techniques:
 | simd_chain           | 397ms  | 10ms     | 40x    |
 | simd_nbody           | 352ms  | 10ms     | 35x    |
 
-### Next optimization opportunities
+### Gap analysis (2026-03-26, wasmtime Cranelift 調査)
 
-1. **v128.load/store guard page path** → reduce bounds check overhead
-2. **FMLA instruction fusion** → ARM64 fused multiply-add
-3. **Non-native SIMD ops to native** → reduce trampoline calls in loops
+zwasm scalar 13.8s vs wasmtime scalar 0.79s = **17x gap** (base JIT quality)
+zwasm SIMD 16.7s vs wasmtime SIMD 0.23s = **74x gap** (SIMD still slower than scalar!)
 
-### Key code locations
+| 要因               | wasmtime                          | zwasm                           | 影響 |
+|--------------------|-----------------------------------|---------------------------------|------|
+| 境界チェック       | Guard page で 0 命令              | CMP+Bcc 毎回（v128 含む）      | 大   |
+| レジスタ常駐       | SSA + regalloc2 でブロック横断    | Q-reg キャッシュ（BB 内のみ）  | 大   |
+| FMA 融合           | ISLE で mul+add → FMLA            | なし（2 命令のまま）           | 中   |
+| LICM               | なし                              | なし                           | —    |
 
-- `jit.zig:2604`: branch target eviction (ARM64)
-- `x86.zig:3872`: branch target eviction (x86)
-- `jit.zig:simdQregEvictAll`: Q-cache eviction function
-- `jit.zig:emitSimdBinaryNeon`: direct Q-reg binary ops (already optimal within basic block)
-- `jit.zig:scanBranchTargets`: identifies branch targets (needs loop detection)
+wasmtime 参照: `~/Documents/OSS/wasmtime/`
+- bounds_checks.rs: 64-bit host = 4GB reservation + 32MB guard
+- lower.isle (aarch64): FMLA rules, v128 bitcast = zero-cost
+- regalloc2: 64 vector vregs pinned to NEON V0-V31
+- **Cranelift は LICM 未実装** — GVN + ISLE 簡約のみ
 
-### SIMD benchmarks
+### Next optimization path (ordered by impact)
 
-Build: `bash bench/simd/build_simd_bench.sh`
-Compare: `bash bench/compare_runtimes.sh --rt=zwasm,wasmtime`
-Sources: `bench/simd/src/` (C: mandelbrot, matmul, simd_chain, nbody, etc.)
-         `bench/simd/rust-blake2/` (Rust: blake2b_simd)
+1. **W46: v128 guard page path** → SIMD 境界チェック除去 (DONE 2026-03-26)
+   - ARM64: all 22 SIMD memory ops now use guard page path
+   - x86: already had guard page conditions (no change needed)
+   - No benchmark impact — mandelbrot inner loop has 0 v128 memory ops
+   - Correct and safe: reduces code size, helps memory-heavy SIMD workloads
+
+2. **W47: FMLA instruction fusion** → mul+add → 1 ARM64 instruction
+   - Detect `f32x4.mul rd,a,b` + `f32x4.add rd2,rd,c` → `FMLA Vd,Va,Vb`
+   - Peephole in IR or emitSimdNativeInner
+   - wasmtime: ISLE rule `(fmadd ty x y z) → FMLA`
+
+3. **W48: Non-native SIMD → native** → reduce SCRATCH indirection
+   - f32x4.le uses SCRATCH0/1 instead of Q-reg cache
+   - Convert to emitSimdBinaryNeon pattern (direct Q-reg ops)
+   - v128.any_true could use cached Q-reg directly
 
 ### Open Work Items
 

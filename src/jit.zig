@@ -5968,11 +5968,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                // Always emit explicit bounds check for v128 (16 bytes)
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 16));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6); // OutOfBoundsMemoryAccess
-                // LDR Q0, [MEM_BASE, SCRATCH]
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 16));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrQreg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 self.emitStoreV128(SIMD_SCRATCH0, instr.rd);
                 return true;
@@ -5984,11 +5984,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                // Always emit explicit bounds check for v128 (16 bytes)
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 16));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
-                // STR Q0, [MEM_BASE, SCRATCH]
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 16));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.strQreg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 return true;
             },
@@ -5998,9 +5998,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 1));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 1));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrbReg(SCRATCH, MEM_BASE, SCRATCH));
                 // DUP V0.16B, Wn = 0x4E010C00
                 self.emit(0x4E010C00 | (@as(u32, SCRATCH) << 5) | SIMD_SCRATCH0);
@@ -6012,9 +6014,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 2));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 2));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrhReg(SCRATCH, MEM_BASE, SCRATCH));
                 // DUP V0.8H, Wn = 0x4E020C00
                 self.emit(0x4E020C00 | (@as(u32, SCRATCH) << 5) | SIMD_SCRATCH0);
@@ -6026,9 +6030,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldr32Reg(SCRATCH, MEM_BASE, SCRATCH));
                 // DUP V0.4S, Wn = 0x4E040C00
                 self.emit(0x4E040C00 | (@as(u32, SCRATCH) << 5) | SIMD_SCRATCH0);
@@ -6040,9 +6046,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldr64Reg(SCRATCH, MEM_BASE, SCRATCH));
                 // DUP V0.2D, Xn = 0x4E080C00
                 self.emit(0x4E080C00 | (@as(u32, SCRATCH) << 5) | SIMD_SCRATCH0);
@@ -6056,9 +6064,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldr32Reg(SCRATCH, MEM_BASE, SCRATCH));
                 // Store as v128 with hi=0: use FMOV to move GP→FP, then store
                 // FMOV Dd, Xn — move GP to lo half of Q (hi zeroed)
@@ -6071,9 +6081,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldr64Reg(SCRATCH, MEM_BASE, SCRATCH));
                 // Store as v128 with hi=0
                 self.emit(a64.fmovToFp64(SIMD_SCRATCH0, SCRATCH));
@@ -6087,9 +6099,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 1));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 1));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field); // existing v128
                 self.emit(a64.ldrbReg(SCRATCH2, MEM_BASE, SCRATCH)); // load byte
                 // INS Vd.B[lane], Wn: imm5 = (lane << 1) | 1
@@ -6104,9 +6118,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 2));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 2));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
                 self.emit(a64.ldrhReg(SCRATCH2, MEM_BASE, SCRATCH));
                 const imm5 = (@as(u32, @as(u3, @truncate(extra))) << 2) | 2;
@@ -6119,9 +6135,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
                 self.emit(a64.ldr32Reg(SCRATCH2, MEM_BASE, SCRATCH));
                 const imm5 = (@as(u32, @as(u2, @truncate(extra))) << 3) | 4;
@@ -6134,9 +6152,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rs2_field);
                 self.emit(a64.ldr64Reg(SCRATCH2, MEM_BASE, SCRATCH));
                 const imm5 = (@as(u32, @as(u1, @truncate(extra))) << 4) | 8;
@@ -6151,9 +6171,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 1));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 1));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rd); // v128 value
                 // UMOV Wd, Vn.B[lane]
                 self.emit(0x0E013C00 | (@as(u32, @as(u4, @truncate(extra))) << 17) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH2);
@@ -6165,9 +6187,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 2));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 2));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rd);
                 // UMOV Wd, Vn.H[lane]
                 self.emit(0x0E023C00 | (@as(u32, @as(u3, @truncate(extra))) << 19) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH2);
@@ -6179,9 +6203,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 4));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rd);
                 // UMOV Wd, Vn.S[lane]
                 self.emit(0x0E043C00 | (@as(u32, @as(u2, @truncate(extra))) << 21) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH2);
@@ -6193,9 +6219,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emitLoadV128(SIMD_SCRATCH0, instr.rd);
                 // UMOV Xd, Vn.D[lane] (Q=1)
                 self.emit(0x4E083C00 | (@as(u32, @as(u1, @truncate(extra))) << 20) | (@as(u32, SIMD_SCRATCH0) << 5) | SCRATCH2);
@@ -6209,9 +6237,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 // LDR D0, [MEM_BASE, SCRATCH] — load 64 bits into lower half
                 self.emit(a64.ldrFp64Reg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 // SSHLL V0.8H, V0.8B, #0 = 0x0F08A400
@@ -6224,9 +6254,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrFp64Reg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 // USHLL V0.8H, V0.8B, #0 = 0x2F08A400
                 self.emit(0x2F08A400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
@@ -6238,9 +6270,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrFp64Reg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 // SSHLL V0.4S, V0.4H, #0 = 0x0F10A400
                 self.emit(0x0F10A400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
@@ -6252,9 +6286,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrFp64Reg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 // USHLL V0.4S, V0.4H, #0 = 0x2F10A400
                 self.emit(0x2F10A400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
@@ -6266,9 +6302,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrFp64Reg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 // SSHLL V0.2D, V0.2S, #0 = 0x0F20A400
                 self.emit(0x0F20A400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
@@ -6280,9 +6318,11 @@ pub const Compiler = struct {
                 const addr_reg = self.getOrLoad(instr.rs1, SCRATCH);
                 self.emit(a64.uxtw(SCRATCH, addr_reg));
                 self.emitAddOffset(SCRATCH, instr.operand);
-                self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
-                self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
-                self.emitCondError(.hi, 6);
+                if (!self.use_guard_pages) {
+                    self.emit(a64.addImm64(SCRATCH2, SCRATCH, 8));
+                    self.emit(a64.cmp64(SCRATCH2, MEM_SIZE));
+                    self.emitCondError(.hi, 6);
+                }
                 self.emit(a64.ldrFp64Reg(SIMD_SCRATCH0, MEM_BASE, SCRATCH));
                 // USHLL V0.2D, V0.2S, #0 = 0x2F20A400
                 self.emit(0x2F20A400 | (@as(u32, SIMD_SCRATCH0) << 5) | SIMD_SCRATCH0);
