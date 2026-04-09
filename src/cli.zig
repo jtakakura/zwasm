@@ -1379,7 +1379,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
                 try stdout.flush();
                 continue;
             };
-            const load_result = types.WasmModule.loadLinked(allocator, load_bytes, root_store) catch |err| {
+            const load_result = types.WasmModule.loadLinked(allocator, load_bytes, root_store, true) catch |err| {
                 allocator.free(load_bytes);
                 try stdout.print("error load {s}\n", .{@errorName(err)});
                 try stdout.flush();
@@ -2121,6 +2121,7 @@ fn formatWasmError(err: anyerror) []const u8 {
         error.MemoryLimitExceeded => "memory grow exceeded maximum",
         error.FuelExhausted => "fuel limit exhausted",
         error.TimeoutExceeded => "execution timed out",
+        error.Canceled => "execution canceled",
         // File errors
         error.FileNotFound => "file not found",
         error.WatNotEnabled => "WAT format disabled (build with -Dwat=true)",

@@ -252,6 +252,7 @@ pub const WasmModule = struct {
         timeout_ms: ?u64 = null,
         max_memory_bytes: ?u64 = null,
         force_interpreter: ?bool = null,
+        cancellable: bool = true,
     };
 
     /// Load a Wasm module from binary bytes with explicit configuration.
@@ -370,7 +371,7 @@ pub const WasmModule = struct {
     /// Phase 2 (applyActive): apply element/data segments — may partially fail.
     /// On phase 2 failure, partial writes persist in the shared store (v2 spec behavior).
     /// Returns .{ module, apply_error } where apply_error is null on full success.
-    pub fn loadLinked(allocator: Allocator, wasm_bytes: []const u8, shared_store: *rt.store_mod.Store) !struct { module: *WasmModule, apply_error: ?anyerror } {
+    pub fn loadLinked(allocator: Allocator, wasm_bytes: []const u8, shared_store: *rt.store_mod.Store, cancellable: bool) !struct { module: *WasmModule, apply_error: ?anyerror } {
         const self = try allocator.create(WasmModule);
 
         self.allocator = allocator;
@@ -412,6 +413,7 @@ pub const WasmModule = struct {
             return .{ .module = self, .apply_error = error.OutOfMemory };
         };
         self.vm.* = rt.vm_mod.Vm.init(allocator);
+        self.vm.cancellable = cancellable;
 
         // Phase 2: apply active element/data segments (may partially fail).
         var apply_error: ?anyerror = null;
@@ -470,9 +472,11 @@ pub const WasmModule = struct {
         self.force_interpreter = config.force_interpreter;
         self.timeout_ms = config.timeout_ms;
         self.fuel = config.fuel;
+        
         if (self.fuel) |f| self.vm.fuel = f;
         if (self.max_memory_bytes) |mb| self.vm.max_memory_bytes = mb;
         if (self.force_interpreter) |fi| self.vm.force_interpreter = fi;
+        self.vm.cancellable = config.cancellable;
         if (self.timeout_ms) |ms| self.vm.setDeadlineTimeoutMs(ms);
 
         // Execute start function if present.
@@ -542,6 +546,15 @@ pub const WasmModule = struct {
         defer self.vm.force_interpreter = saved_fi;
         defer if (self.fuel != null) { self.fuel = self.vm.fuel; };
         try self.vm.invoke(&self.instance, name, args, results);
+    }
+
+    /// Request cancellation of the currently executing Wasm function.
+    /// Can be called from another thread while invoke() is in progress.
+    /// The execution will be stopped at the next instruction checkpoint (approximately every 1024 instructions),
+    /// and invoke() will return error.Canceled.
+    /// Thread-safe. Has no effect if no function is currently executing.
+    pub fn cancel(self: *WasmModule) void {
+        self.vm.cancel();
     }
 
     /// Read bytes from linear memory at the given offset.
@@ -1165,7 +1178,7 @@ test "multi-module — shared table via loadLinked" {
 
     // Load Ot into Mt's shared store: imports tab and h from Mt, writes elem [1,2] = [$i,$h]
     const ot_bytes = @embedFile("testdata/31_table_import.wasm");
-    const ot_result = try WasmModule.loadLinked(testing.allocator, ot_bytes, &mt.store);
+    const ot_result = try WasmModule.loadLinked(testing.allocator, ot_bytes, &mt.store, true);
     var ot = ot_result.module;
     defer ot.deinit();
     try testing.expect(ot_result.apply_error == null);
