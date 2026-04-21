@@ -5,6 +5,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-04-21
+
+### Added
+- `-Dpic` and `-Dcompiler-rt` build options for static library consumers (PR #24)
+
+### Fixed
+- Preserve caller-set `vm.*` settings (fuel, deadline, max_memory_bytes, force_interpreter)
+  across `invoke()` and `invokeInterpreterOnly()` — previously reset to defaults between
+  invocations (PR #31, #32)
+- `setup-orbstack.md`: broken Zig download URL (PR #35)
+
+### Changed
+- Spec testsuite bumped to `f9c743a` (from `072bd0d`)
+
 ## [1.7.0] - 2026-04-03
 
 ### Added
