@@ -12,7 +12,7 @@ Session handover document. Read at session start.
 - FFI: 80/80 Mac+Ubuntu.
 - JIT: Register IR + ARM64/x86_64 + SIMD (NEON 253/256, SSE 244/256).
 - HOT_THRESHOLD=3 (lowered from 10 in W38).
-- Binary stripped: Mac 1.38 MB, Linux 1.65 MB (ceiling 1.80 MB). Memory: ~3.5 MB RSS.
+- Binary stripped: Mac 1.20 MB, Linux 1.56 MB (ceiling 1.80 MB; post-W48 Phase 1). Memory: ~3.5 MB RSS.
 - Platforms: macOS ARM64, Linux x86_64/ARM64, Windows x86_64.
 - **main = stable**. v1.10.0 released; post-release work on delib / W46 merged
   via PRs #47 (1a/1b pre-cursor), #48 (1b), #49 (1c/1d/1e/1f + C-API libc fix).
@@ -22,24 +22,46 @@ Session handover document. Read at session start.
 
 ## Current Task
 
-**W46 Phase 2 — DONE (2026-04-25).** Routed remaining `std.c.*` direct calls
-in `wasi.zig` (fdatasync, fcntl, ftruncate, futimens, utimensat, symlinkat,
-linkat, fstatat) through new `platform.zig` helpers. Size result was
-neutral — Linux never hit those branches (comptime-pruned), so this is a
-pure consistency/encapsulation refactor. Linux binary stays at 1.65 MB
-stripped; the 1.50 MB goal is now tracked as **W48** with specific size
-contributors identified (std.debug+Dwarf ~170 KB, std.Io.Threaded ~115 KB,
-sort.* ~50 KB, std.Progress ~18 KB). Next candidate work:
+**W48 Phase 1 — DONE (2026-04-25).** Trimmed Linux binary from 1.64 → 1.56 MB
+(-83 KB, -5%) and Mac binary from 1.38 → 1.20 MB (-180 KB, -13%) via three
+changes in `src/cli.zig`:
+
+1. `pub const panic = std.debug.simple_panic;` — skips `FullPanic`'s
+   formatted safety-panic messages + the `defaultPanic` /
+   `writeCurrentStackTrace` DWARF pull-in.
+2. `pub const std_options: std.Options = .{ .enable_segfault_handler = false };`
+   — zwasm already installs its own SIGSEGV handler in
+   `guard_mod.installSignalHandler()` for JIT guard-page OOB, so the std
+   default handler is always replaced at runtime anyway. Disabling it at
+   comptime elides `std.debug.handleSegfaultPosix` and the transitive
+   pull-in of `SelfInfo.Elf.*`.
+3. `pub fn main(init) u8 { return runCli(init) catch |err| { ... } }` —
+   `main` no longer returns an error union, so `start.zig`'s `wrapMain`
+   inlines the `u8` arm and never emits the call to
+   `std.debug.dumpErrorReturnTrace`.
+
+Remaining ~62 KB to target 1.50 MB (still well under 1.80 MB ceiling):
+`debug.*` ~81 KB (SelfInfo.Elf / Dwarf / writeTrace still reachable via
+`std.debug.lockStderr` → `std.Options.debug_io`), `std.Io.Threaded` ~115 KB.
+Tracked as W48 Phase 2 — next lever is `std_options_debug_io` override
+with a minimal direct-stderr Io instance. Non-blocking.
+
+Next candidate work:
 
 - **W47**: `tgo_strops_cached` +24% regression investigation (single-benchmark,
   low priority). See checklist.
 - **W45**: SIMD loop persistence — skip Q-cache eviction at loop headers
   (requires back-edge detection in `scanBranchTargets`).
-- **W48**: Linux binary size 1.65 → 1.50 MB. Candidates: custom panic
-  handler (dropping source-location printing), trim std.Io.Threaded
-  surface, measure ReleaseSmall. Non-blocking; 1.80 MB ceiling has slack.
+- **W48 Phase 2**: remaining 62 KB to reach 1.50 MB Linux. Non-blocking.
 
 ## Previous Task
+
+**W46 Phase 2 — DONE (2026-04-25 via PR #52).** Routed remaining `std.c.*`
+direct calls in `wasi.zig` through `platform.zig` helpers. Size-neutral on
+Linux because the `std.c.*` sites were already inside comptime-pruned
+`else` arms; pure consistency refactor.
+
+### W46 earlier phases
 
 **W46 Phase 1c/1d/1e/1f — DONE (2026-04-25 via PR #49).**
 

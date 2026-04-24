@@ -19,14 +19,18 @@ Prefix: W## (to distinguish from CW's F## items).
   path — likely regalloc or memory-access pattern change. Low priority
   since 20 other benchmarks improved >10% (GC paths 40–76% faster).
 
-- [ ] W48: Linux binary size 1.65 MB → 1.50 MB. W46 Phase 2 refactor was
-  size-neutral because Linux never hit the `std.c.*` branches (comptime-
-  pruned). The 150 KB gap vs 1.50 MB target is dominated by
-  `std.debug` + `Dwarf` (~170 KB, panic-handler source-location printing),
-  `std.Io.Threaded` (~115 KB), `sort.*` (~50 KB), `std.Progress` (~18 KB).
-  Candidates: override `std.debug.panic`, trim `std.Io.Threaded` surface,
-  measure `-Doptimize=ReleaseSmall`. Non-blocking; ceiling 1.80 MB still
-  has slack.
+- [ ] W48 Phase 2: Linux binary size 1.56 MB → 1.50 MB (~62 KB more).
+  W48 Phase 1 shipped (2026-04-25): `pub const panic = std.debug.simple_panic`
+  in `src/cli.zig` + `std_options.enable_segfault_handler = false` (zwasm
+  installs its own SIGSEGV handler for JIT guard pages anyway) + changed
+  `main` from `!void` to `u8` to avoid `dumpErrorReturnTrace` pull-in.
+  Net: Linux 1.64 → 1.56 MB (-83 KB, -5%), Mac 1.38 → 1.20 MB (-180 KB).
+  Remaining contributors: `debug.*` still 81 KB (SelfInfo.Elf, Dwarf, writeTrace
+  pulled via `std.debug.lockStderr` → `std.Options.debug_io` default),
+  `std.Io.Threaded` ~115 KB, `sort.*` ~39 KB. Candidates: override
+  `std_options_debug_io` with a minimal direct-stderr Io instance; audit
+  whether `init.io` Threaded can be thinned. Non-blocking; ceiling 1.80 MB
+  still has slack.
 
 ## Resolved (summary)
 

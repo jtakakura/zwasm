@@ -12,6 +12,23 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const types = @import("types.zig");
+
+/// Minimal panic namespace: prints the message and traps, without
+/// pulling in DWARF parsing / source-location printing via the default
+/// `FullPanic` / `debug.defaultPanic` path. Saves ~30 KB on Linux,
+/// ~150 KB on Mac (W48). Tests still use the default handler because
+/// the test root is `src/types.zig`, not `src/cli.zig`.
+pub const panic = std.debug.simple_panic;
+
+/// Disable the std default segfault handler. zwasm already installs its
+/// own SIGSEGV handler in `guard_mod.installSignalHandler()` for JIT
+/// guard-page OOB traps, so the std handler would just be replaced at
+/// runtime anyway. Declaring this elides the default handler and its
+/// transitive pull-in of `debug.writeCurrentStackTrace` /
+/// `debug.SelfInfo.Elf.*` / DWARF parsing from the release binary.
+pub const std_options: std.Options = .{
+    .enable_segfault_handler = false,
+};
 const module_mod = @import("module.zig");
 const opcode = @import("opcode.zig");
 const vm_mod = @import("vm.zig");
@@ -33,7 +50,21 @@ const platform = @import("platform.zig");
 /// `io` through explicit parameters rather than relying on this global.
 var cli_io: std.Io = undefined;
 
-pub fn main(init: std.process.Init) !void {
+/// Entry point. Returns `u8` (not `!void`) so the start.zig wrapper does
+/// not emit a call to `std.debug.dumpErrorReturnTrace` — that pull-in
+/// drags DWARF / ELF parsing into the binary (~80 KB on Linux). We catch
+/// errors here and print them ourselves (W48).
+pub fn main(init: std.process.Init) u8 {
+    return runCli(init) catch |err| {
+        var buf: [256]u8 = undefined;
+        var w = std.Io.File.stderr().writer(init.io, &buf);
+        w.interface.print("error: {t}\n", .{err}) catch {};
+        w.interface.flush() catch {};
+        return 1;
+    };
+}
+
+fn runCli(init: std.process.Init) !u8 {
     // Install signal handler for JIT guard page OOB traps
     if (comptime jit_mod.jitSupported()) {
         guard_mod.installSignalHandler();
@@ -70,25 +101,26 @@ pub fn main(init: std.process.Init) !void {
     if (args.len < 2) {
         printUsage(stdout);
         try stdout.flush();
-        return;
+        return 0;
     }
 
     const command = args[1];
+    var exit_code: u8 = 0;
 
     if (std.mem.eql(u8, command, "run")) {
         const ok = try cmdRun(allocator, args[2..], stdout, stderr);
         try stdout.flush();
-        if (!ok) std.process.exit(1);
+        if (!ok) exit_code = 1;
     } else if (std.mem.eql(u8, command, "inspect")) {
         try cmdInspect(allocator, args[2..], stdout, stderr);
     } else if (std.mem.eql(u8, command, "validate")) {
         const ok = try cmdValidate(allocator, args[2..], stdout, stderr);
         try stdout.flush();
-        if (!ok) std.process.exit(1);
+        if (!ok) exit_code = 1;
     } else if (std.mem.eql(u8, command, "compile")) {
         const ok = try cmdCompile(allocator, args[2..], stdout, stderr);
         try stdout.flush();
-        if (!ok) std.process.exit(1);
+        if (!ok) exit_code = 1;
     } else if (std.mem.eql(u8, command, "features")) {
         cmdFeatures(args[2..], stdout, stderr);
     } else if (std.mem.eql(u8, command, "help") or std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h")) {
@@ -99,13 +131,14 @@ pub fn main(init: std.process.Init) !void {
         // zwasm file.wasm ... → shorthand for zwasm run file.wasm ...
         const ok = try cmdRun(allocator, args[1..], stdout, stderr);
         try stdout.flush();
-        if (!ok) std.process.exit(1);
+        if (!ok) exit_code = 1;
     } else {
         try stderr.print("error: unknown command '{s}'\n", .{command});
         try stderr.flush();
         printUsage(stdout);
     }
     try stdout.flush();
+    return exit_code;
 }
 
 fn printUsage(w: *std.Io.Writer) void {
