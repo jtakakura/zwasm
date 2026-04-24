@@ -405,6 +405,13 @@ pub const Vm = struct {
     /// If true (default), JIT loops are periodically interrupted to check the flag.
     /// If false, JIT execution runs at maximum speed but cannot be cancelled.
     cancellable: bool = true,
+    /// Zig 0.16 I/O interface. Populated by `WasmModule.loadCore` before any
+    /// filesystem or synchronization operation runs; tests that never touch
+    /// wasi/memory-atomic paths can leave this `undefined` and `Vm.init` will
+    /// not access it. Long-running processes should treat this as immutable
+    /// after load — all downstream code captures it by value through the
+    /// vtable pointer inside `std.Io`.
+    io: std.Io = undefined,
     /// Force stack-based interpreter for all functions, bypassing RegIR and JIT.
     /// Used by differential testing to get a "reference" result.
     force_interpreter: bool = false,

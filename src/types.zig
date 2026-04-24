@@ -242,6 +242,10 @@ pub const WasmModule = struct {
     /// to `vm.force_interpreter` before each call; when null, `vm.force_interpreter`
     /// is left untouched so callers may set it directly on `self.vm`.
     force_interpreter: ?bool = null,
+    /// Owned Io implementation constructed when Config.io was null. The module
+    /// tears this down in `deinit` alongside the Vm. Null when the embedder
+    /// supplied their own `io` — lifetime is the embedder's responsibility.
+    owned_io: ?*std.Io.Threaded = null,
 
     /// Configuration for module loading.
     pub const Config = struct {
@@ -256,6 +260,11 @@ pub const WasmModule = struct {
         /// Set to `false` to skip the check for peak JIT throughput, at the cost
         /// of making `WasmModule.cancel()` ineffective for JIT-compiled code.
         cancellable: ?bool = null,
+        /// Zig 0.16 I/O interface. Null → the loaded module owns a private
+        /// `std.Io.Threaded` (torn down in `deinit`). Embedders pass their own
+        /// `io` when they need `Uring`/`Kqueue`, to share an event loop, or to
+        /// inject a mock for tests. See D135 in `.dev/decisions.md`.
+        io: ?std.Io = null,
     };
 
     /// Load a Wasm module from binary bytes with explicit configuration.
@@ -383,6 +392,7 @@ pub const WasmModule = struct {
 
         self.allocator = allocator;
         self.owned_wasm_bytes = null;
+        self.owned_io = null;
         self.store = rt.store_mod.Store.init(allocator);
         self.wasi_ctx = null;
         self.timeout_ms = null;
@@ -422,6 +432,15 @@ pub const WasmModule = struct {
         };
         self.vm.?.* = rt.vm_mod.Vm.init(allocator);
 
+        // Stand up a private Threaded Io for this linked module. loadLinked
+        // has no Config, so we always own it; embedders who need to share an
+        // Io across linked modules can set `self.vm.io` after the call.
+        self.owned_io = allocator.create(std.Io.Threaded) catch null;
+        if (self.owned_io) |t| {
+            t.* = std.Io.Threaded.init(allocator, .{});
+            self.vm.?.io = t.io();
+        }
+
         // Phase 2: apply active element/data segments (may partially fail).
         var apply_error: ?anyerror = null;
         self.instance.applyActive() catch |err| {
@@ -437,6 +456,7 @@ pub const WasmModule = struct {
 
         self.allocator = allocator;
         self.owned_wasm_bytes = null;
+        self.owned_io = null;
         self.store = rt.store_mod.Store.init(allocator);
         errdefer self.store.deinit();
 
@@ -475,6 +495,23 @@ pub const WasmModule = struct {
         self.vm = try allocator.create(rt.vm_mod.Vm);
         errdefer if (self.vm) |vm| allocator.destroy(vm);
         self.vm.?.* = rt.vm_mod.Vm.init(allocator);
+
+        // Io acquisition per D135: use caller-supplied io if any, otherwise
+        // stand up a private `std.Io.Threaded` owned by this module.
+        if (config.io) |io_val| {
+            self.vm.?.io = io_val;
+        } else {
+            const threaded = try allocator.create(std.Io.Threaded);
+            errdefer allocator.destroy(threaded);
+            threaded.* = std.Io.Threaded.init(allocator, .{});
+            self.owned_io = threaded;
+            self.vm.?.io = threaded.io();
+        }
+        errdefer if (self.owned_io) |t| {
+            t.deinit();
+            allocator.destroy(t);
+        };
+
         self.max_memory_bytes = config.max_memory_bytes;
         self.force_interpreter = config.force_interpreter;
         self.timeout_ms = config.timeout_ms;
@@ -519,6 +556,13 @@ pub const WasmModule = struct {
         self.module.deinit();
         self.store.deinit();
         if (self.owned_wasm_bytes) |bytes| allocator.free(bytes);
+        // Tear down the Io after Vm/Instance so anything that captured the
+        // vtable is already gone. Embedder-supplied io (owned_io == null) is
+        // the embedder's lifetime to manage.
+        if (self.owned_io) |t| {
+            t.deinit();
+            allocator.destroy(t);
+        }
         allocator.destroy(self);
     }
 
