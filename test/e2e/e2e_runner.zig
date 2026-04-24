@@ -98,11 +98,12 @@ const TestRunner = struct {
     verbose: bool = false,
     failures: std.ArrayList([]const u8),
 
-    fn init(allocator: Allocator, dir: []const u8, verbose: bool) !TestRunner {
+    fn init(allocator: Allocator, io: std.Io, dir: []const u8, verbose: bool) !TestRunner {
         const store = try allocator.create(Store);
         store.* = Store.init(allocator);
         const vm = try allocator.create(VmImpl);
         vm.* = VmImpl.init(allocator);
+        vm.io = io;
         return .{
             .allocator = allocator,
             .dir = dir,
@@ -504,17 +505,25 @@ const TestRunner = struct {
     fn loadWasmFile(self: *TestRunner, filename: []const u8) ?[]const u8 {
         const path = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.dir, filename }) catch return null;
         defer self.allocator.free(path);
-        const file = std.fs.cwd().openFile(path, .{}) catch return null;
-        defer file.close();
-        const stat = file.stat() catch return null;
-        const bytes = self.allocator.alloc(u8, stat.size) catch return null;
-        const read = file.readAll(bytes) catch {
-            self.allocator.free(bytes);
-            return null;
-        };
-        if (read != stat.size) {
-            self.allocator.free(bytes);
-            return null;
+        var path_z: [std.posix.PATH_MAX]u8 = undefined;
+        if (path.len >= path_z.len) return null;
+        @memcpy(path_z[0..path.len], path);
+        path_z[path.len] = 0;
+        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+        if (fd < 0) return null;
+        defer _ = std.c.close(fd);
+        var st: std.posix.Stat = undefined;
+        if (std.c.fstat(fd, &st) != 0) return null;
+        const size: usize = @intCast(st.size);
+        const bytes = self.allocator.alloc(u8, size) catch return null;
+        var filled: usize = 0;
+        while (filled < size) {
+            const rc = std.c.read(fd, bytes.ptr + filled, size - filled);
+            if (rc <= 0) {
+                self.allocator.free(bytes);
+                return null;
+            }
+            filled += @intCast(rc);
         }
         return bytes;
     }
@@ -570,13 +579,25 @@ const TestRunner = struct {
         const old_failed = self.failed;
         const old_skipped = self.skipped;
 
-        const file = try std.fs.cwd().openFile(json_path, .{});
-        defer file.close();
-        const stat = try file.stat();
-        const content = try self.allocator.alloc(u8, stat.size);
+        var path_z: [std.posix.PATH_MAX]u8 = undefined;
+        if (json_path.len >= path_z.len) return error.NameTooLong;
+        @memcpy(path_z[0..json_path.len], json_path);
+        path_z[json_path.len] = 0;
+        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
+        if (fd < 0) return error.FileNotFound;
+        defer _ = std.c.close(fd);
+        var st: std.posix.Stat = undefined;
+        if (std.c.fstat(fd, &st) != 0) return error.StatFailed;
+        const size: usize = @intCast(st.size);
+        const content = try self.allocator.alloc(u8, size);
         defer self.allocator.free(content);
-        const read = try file.readAll(content);
-        if (read != stat.size) return error.IncompleteRead;
+        var filled: usize = 0;
+        while (filled < size) {
+            const rc = std.c.read(fd, content.ptr + filled, size - filled);
+            if (rc <= 0) return error.IncompleteRead;
+            filled += @intCast(rc);
+        }
+        const read = filled;
 
         const parsed = std.json.parseFromSlice(JsonTestFile, self.allocator, content[0..read], .{
             .ignore_unknown_fields = true,
@@ -702,13 +723,12 @@ fn isNaN64(bits: u64) bool {
 // Main
 // ============================================================
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const io = init.io;
+
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     var dir: ?[]const u8 = null;
     var file: ?[]const u8 = null;
@@ -731,12 +751,12 @@ pub fn main() !void {
     }
 
     var buf: [8192]u8 = undefined;
-    var writer = std.Io.File.stdout().writer(&buf);
+    var writer = std.Io.File.stdout().writer(init.io, &buf);
     const stdout = &writer.interface;
 
     if (file) |f| {
         const parent_dir = std.fs.path.dirname(f) orelse ".";
-        var runner = try TestRunner.init(allocator, parent_dir, verbose);
+        var runner = try TestRunner.init(allocator, io, parent_dir, verbose);
         defer runner.deinit();
 
         const result = try runner.runFile(f);
@@ -757,12 +777,12 @@ pub fn main() !void {
     }
 
     if (dir) |d| {
-        var json_dir = std.fs.cwd().openDir(d, .{ .iterate = true }) catch {
+        var json_dir = std.Io.Dir.cwd().openDir(io, d, .{ .iterate = true }) catch {
             try stdout.print("ERROR: Cannot open directory: {s}\n", .{d});
             try stdout.flush();
             std.process.exit(1);
         };
-        defer json_dir.close();
+        defer json_dir.close(io);
 
         var files = std.ArrayList([]const u8).empty;
         defer {
@@ -771,7 +791,7 @@ pub fn main() !void {
         }
 
         var iter = json_dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             if (entry.kind != .file) continue;
             if (!std.mem.endsWith(u8, entry.name, ".json")) continue;
             try files.append(allocator, try allocator.dupe(u8, entry.name));
@@ -792,7 +812,7 @@ pub fn main() !void {
             const json_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ d, json_name });
             defer allocator.free(json_path);
 
-            var runner = try TestRunner.init(allocator, d, verbose);
+            var runner = try TestRunner.init(allocator, io, d, verbose);
             defer runner.deinit();
 
             const result = runner.runFile(json_path) catch |err| {
