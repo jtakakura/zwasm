@@ -131,6 +131,15 @@ fn linuxResultAsIsize(rc: usize) isize {
     return @bitCast(rc);
 }
 
+fn linuxResultAsI32(rc: usize) i32 {
+    const e = std.os.linux.errno(rc);
+    if (e != .SUCCESS) {
+        std.c._errno().* = @intFromEnum(e);
+        return -1;
+    }
+    return 0;
+}
+
 fn linuxResultAsI64(rc: usize) i64 {
     const e = std.os.linux.errno(rc);
     if (e != .SUCCESS) {
@@ -238,6 +247,63 @@ pub fn pfdClose(handle: std.posix.fd_t) void {
         .windows => _ = CloseHandle(handle),
         .linux => _ = std.os.linux.close(handle),
         else => _ = std.c.close(handle),
+    }
+}
+
+// Path-based helpers. All POSIX-only (callers of these helpers already
+// branch to a `std.Io.Dir` path on Windows before reaching here). The
+// `.windows` arms return -1 so compilation succeeds on Windows builds;
+// the helpers themselves are never reached at runtime on Windows.
+pub fn pfdMkdirAt(dirfd: std.posix.fd_t, path: [*:0]const u8, mode: u32) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsI32(std.os.linux.mkdirat(dirfd, path, mode)),
+        else => return @intCast(std.c.mkdirat(dirfd, path, @intCast(mode))),
+    }
+}
+
+pub fn pfdUnlinkAt(dirfd: std.posix.fd_t, path: [*:0]const u8, flags: u32) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsI32(std.os.linux.unlinkat(dirfd, path, flags)),
+        else => return @intCast(std.c.unlinkat(dirfd, path, @intCast(flags))),
+    }
+}
+
+pub fn pfdRenameAt(
+    old_dirfd: std.posix.fd_t,
+    old_path: [*:0]const u8,
+    new_dirfd: std.posix.fd_t,
+    new_path: [*:0]const u8,
+) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsI32(std.os.linux.renameat(old_dirfd, old_path, new_dirfd, new_path)),
+        else => return @intCast(std.c.renameat(old_dirfd, old_path, new_dirfd, new_path)),
+    }
+}
+
+pub fn pfdReadlinkAt(dirfd: std.posix.fd_t, path: [*:0]const u8, buf: []u8) isize {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => return linuxResultAsIsize(std.os.linux.readlinkat(dirfd, path, buf.ptr, buf.len)),
+        else => return std.c.readlinkat(dirfd, path, buf.ptr, buf.len),
+    }
+}
+
+pub fn pfdDup(fd: std.posix.fd_t) i32 {
+    switch (comptime builtin.os.tag) {
+        .windows => return -1,
+        .linux => {
+            const rc = std.os.linux.dup(fd);
+            const e = std.os.linux.errno(rc);
+            if (e != .SUCCESS) {
+                std.c._errno().* = @intFromEnum(e);
+                return -1;
+            }
+            return @intCast(rc);
+        },
+        else => return @intCast(std.c.dup(fd)),
     }
 }
 

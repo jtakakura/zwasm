@@ -1652,7 +1652,7 @@ pub fn path_create_directory(ctx: *anyopaque, _: usize) anyerror!void {
         try pushErrno(vm, .NAMETOOLONG);
         return;
     };
-    if (std.c.mkdirat(host_fd, path_z.ptr, 0o777) != 0) {
+    if (platform.pfdMkdirAt(host_fd, path_z.ptr, 0o777) != 0) {
         try pushErrno(vm, cErrnoToWasi());
         return;
     }
@@ -1697,7 +1697,7 @@ pub fn path_remove_directory(ctx: *anyopaque, _: usize) anyerror!void {
         try pushErrno(vm, .NAMETOOLONG);
         return;
     };
-    if (std.c.unlinkat(host_fd, path_z.ptr, @intCast(posix.AT.REMOVEDIR)) != 0) {
+    if (platform.pfdUnlinkAt(host_fd, path_z.ptr, @intCast(posix.AT.REMOVEDIR)) != 0) {
         try pushErrno(vm, cErrnoToWasi());
         return;
     }
@@ -1742,7 +1742,7 @@ pub fn path_unlink_file(ctx: *anyopaque, _: usize) anyerror!void {
         try pushErrno(vm, .NAMETOOLONG);
         return;
     };
-    if (std.c.unlinkat(host_fd, path_z.ptr, 0) != 0) {
+    if (platform.pfdUnlinkAt(host_fd, path_z.ptr, 0) != 0) {
         try pushErrno(vm, cErrnoToWasi());
         return;
     }
@@ -1802,7 +1802,7 @@ pub fn path_rename(ctx: *anyopaque, _: usize) anyerror!void {
         try pushErrno(vm, .NAMETOOLONG);
         return;
     };
-    if (std.c.renameat(old_host_fd, old_z.ptr, new_host_fd, new_z.ptr) != 0) {
+    if (platform.pfdRenameAt(old_host_fd, old_z.ptr, new_host_fd, new_z.ptr) != 0) {
         try pushErrno(vm, cErrnoToWasi());
         return;
     }
@@ -2053,7 +2053,17 @@ pub fn fd_filestat_set_times(ctx: *anyopaque, _: usize) anyerror!void {
     };
 
     const times = wasiTimesToTimespec(fst_flags, atim_ns, mtim_ns);
-    if (std.c.futimens(host_fd, &times) != 0) {
+    const failed = switch (comptime builtin.os.tag) {
+        .linux => blk: {
+            // utimensat(fd, NULL, times, 0) == futimens(fd, times)
+            const rc = std.os.linux.utimensat(host_fd, null, &times, 0);
+            const e = std.os.linux.errno(rc);
+            if (e != .SUCCESS) std.c._errno().* = @intFromEnum(e);
+            break :blk e != .SUCCESS;
+        },
+        else => std.c.futimens(host_fd, &times) != 0,
+    };
+    if (failed) {
         try pushErrno(vm, cErrnoToWasi());
         return;
     }
@@ -2301,7 +2311,7 @@ pub fn fd_renumber(ctx: *anyopaque, _: usize) anyerror!void {
     // Dup host fd and assign to fd_to slot
     const new_host = blk: {
         if (builtin.os.tag == .windows) unreachable;
-        const rc = std.c.dup(from_host);
+        const rc = platform.pfdDup(from_host);
         if (rc < 0) {
             try pushErrno(vm, cErrnoToWasi());
             return;
@@ -2486,7 +2496,7 @@ pub fn path_readlink(ctx: *anyopaque, _: usize) anyerror!void {
         try pushErrno(vm, .NAMETOOLONG);
         return;
     };
-    const rc = std.c.readlinkat(host_fd, path_z.ptr, buf.ptr, buf.len);
+    const rc = platform.pfdReadlinkAt(host_fd, path_z.ptr, buf);
     if (rc < 0) {
         try pushErrno(vm, cErrnoToWasi());
         return;
