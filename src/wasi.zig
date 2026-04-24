@@ -511,6 +511,17 @@ fn pathToZ(buf: *[std.posix.PATH_MAX]u8, path: []const u8) error{NameTooLong}![:
     return buf[0..path.len :0];
 }
 
+/// Size of an open regular file via `lseek(SEEK_END)`. Used by test helpers
+/// and the IR cache loader — `std.c.fstat` / `std.posix.Stat` are
+/// inaccessible on Linux in Zig 0.16 (see `fstatatToFileStat` for the
+/// full-stat path). Returns null on error or unseekable fd.
+pub fn fdSize(fd: posix.fd_t) ?u64 {
+    const end = std.c.lseek(fd, 0, posix.SEEK.END);
+    if (end < 0) return null;
+    _ = std.c.lseek(fd, 0, posix.SEEK.SET);
+    return @intCast(end);
+}
+
 /// Read libc errno and map to a WASI Errno.
 fn cErrnoToWasi() Errno {
     const e: std.posix.E = @enumFromInt(std.c._errno().*);
@@ -565,6 +576,81 @@ fn wasiNanos(value: i128) u64 {
         break :blk if (value < 0) std.math.minInt(i64) else std.math.maxInt(i64);
     };
     return @bitCast(clamped);
+}
+
+// Cross-platform fstatat wrapper. Zig 0.16 only binds `std.c.fstatat` on
+// Darwin/BSD (Linux is `{}`), and `std.posix.Stat` is `void` on Linux
+// because stdlib uses `statx` there. Define a platform-neutral FileStat with
+// just the WASI-filestat fields, then fill it via the best syscall per OS.
+const FileStat = struct {
+    ino: u64,
+    nlink: u64,
+    size: u64,
+    filetype: u8,
+    atim_ns: i128,
+    mtim_ns: i128,
+    ctim_ns: i128,
+};
+
+fn fstatatToFileStat(dirfd: posix.fd_t, path_z: [*:0]const u8, nofollow: u32) !FileStat {
+    if (builtin.os.tag == .linux) {
+        const linux = std.os.linux;
+        var sx: linux.Statx = undefined;
+        const STATX_BASIC_STATS: u32 = 0x7ff;
+        const rc = linux.statx(dirfd, path_z, nofollow, @bitCast(STATX_BASIC_STATS), &sx);
+        switch (posix.errno(rc)) {
+            .SUCCESS => {},
+            else => return error.Stat,
+        }
+        const filetype: u8 = blk: {
+            const mode = sx.mode;
+            const S_IFMT: u16 = 0o170000;
+            const kind = mode & S_IFMT;
+            if (kind == 0o040000) break :blk @intFromEnum(Filetype.DIRECTORY);
+            if (kind == 0o120000) break :blk @intFromEnum(Filetype.SYMBOLIC_LINK);
+            if (kind == 0o100000) break :blk @intFromEnum(Filetype.REGULAR_FILE);
+            if (kind == 0o060000) break :blk @intFromEnum(Filetype.BLOCK_DEVICE);
+            if (kind == 0o020000) break :blk @intFromEnum(Filetype.CHARACTER_DEVICE);
+            break :blk @intFromEnum(Filetype.UNKNOWN);
+        };
+        return .{
+            .ino = sx.ino,
+            .nlink = sx.nlink,
+            .size = sx.size,
+            .filetype = filetype,
+            .atim_ns = @as(i128, sx.atime.sec) * 1_000_000_000 + sx.atime.nsec,
+            .mtim_ns = @as(i128, sx.mtime.sec) * 1_000_000_000 + sx.mtime.nsec,
+            .ctim_ns = @as(i128, sx.ctime.sec) * 1_000_000_000 + sx.ctime.nsec,
+        };
+    }
+    // Darwin/BSD: std.c.fstatat + system.Stat.
+    var st: std.c.Stat = undefined;
+    if (std.c.fstatat(dirfd, path_z, &st, nofollow) != 0) return error.Stat;
+    const S = posix.S;
+    const filetype: u8 = if (S.ISDIR(st.mode))
+        @intFromEnum(Filetype.DIRECTORY)
+    else if (S.ISLNK(st.mode))
+        @intFromEnum(Filetype.SYMBOLIC_LINK)
+    else if (S.ISREG(st.mode))
+        @intFromEnum(Filetype.REGULAR_FILE)
+    else if (S.ISBLK(st.mode))
+        @intFromEnum(Filetype.BLOCK_DEVICE)
+    else if (S.ISCHR(st.mode))
+        @intFromEnum(Filetype.CHARACTER_DEVICE)
+    else
+        @intFromEnum(Filetype.UNKNOWN);
+    const at = st.atime();
+    const mt = st.mtime();
+    const ct = st.ctime();
+    return .{
+        .ino = @intCast(st.ino),
+        .nlink = @intCast(st.nlink),
+        .size = @bitCast(@as(i64, @intCast(st.size))),
+        .filetype = filetype,
+        .atim_ns = @as(i128, at.sec) * 1_000_000_000 + at.nsec,
+        .mtim_ns = @as(i128, mt.sec) * 1_000_000_000 + mt.nsec,
+        .ctim_ns = @as(i128, ct.sec) * 1_000_000_000 + ct.nsec,
+    };
 }
 
 fn wasiTsNanos(ts: std.Io.Timestamp) u64 {
@@ -1167,34 +1253,21 @@ fn writeFilestat(memory: *WasmMemory, ptr: u32, stat: std.Io.File.Stat) !void {
 }
 
 /// Write a WASI filestat struct from a POSIX fstatat result (preserves nlink).
-/// Used on non-Windows for path_filestat_get where fstatat is needed for symlink control.
-fn writeFilestatPosix(memory: *WasmMemory, ptr: u32, stat: posix.Stat) !void {
+/// Write a WASI filestat struct from our cross-platform FileStat (populated
+/// via `fstatatToFileStat`). Used on non-Windows for path_filestat_get where
+/// fstatat is needed for symlink control.
+fn writeFilestatPosix(memory: *WasmMemory, ptr: u32, stat: FileStat) !void {
     if (comptime builtin.os.tag == .windows) @compileError("writeFilestatPosix not available on Windows");
     const data = memory.memory();
     if (ptr + 64 > data.len) return error.OutOfBoundsMemoryAccess;
     @memset(data[ptr .. ptr + 64], 0);
-    try memory.write(u64, ptr, 8, @bitCast(@as(i64, @intCast(stat.ino))));
-    const S = posix.S;
-    data[ptr + 16] = if (S.ISDIR(stat.mode))
-        @intFromEnum(Filetype.DIRECTORY)
-    else if (S.ISLNK(stat.mode))
-        @intFromEnum(Filetype.SYMBOLIC_LINK)
-    else if (S.ISREG(stat.mode))
-        @intFromEnum(Filetype.REGULAR_FILE)
-    else if (S.ISBLK(stat.mode))
-        @intFromEnum(Filetype.BLOCK_DEVICE)
-    else if (S.ISCHR(stat.mode))
-        @intFromEnum(Filetype.CHARACTER_DEVICE)
-    else
-        @intFromEnum(Filetype.UNKNOWN);
-    try memory.write(u64, ptr, 24, @bitCast(@as(i64, @intCast(stat.nlink))));
-    try memory.write(u64, ptr, 32, @bitCast(@as(i64, @intCast(stat.size))));
-    const at = stat.atime();
-    const mt = stat.mtime();
-    const ct = stat.ctime();
-    try memory.write(u64, ptr, 40, @bitCast(@as(i64, at.sec) * 1_000_000_000 + at.nsec));
-    try memory.write(u64, ptr, 48, @bitCast(@as(i64, mt.sec) * 1_000_000_000 + mt.nsec));
-    try memory.write(u64, ptr, 56, @bitCast(@as(i64, ct.sec) * 1_000_000_000 + ct.nsec));
+    try memory.write(u64, ptr, 8, stat.ino);
+    data[ptr + 16] = stat.filetype;
+    try memory.write(u64, ptr, 24, stat.nlink);
+    try memory.write(u64, ptr, 32, stat.size);
+    try memory.write(u64, ptr, 40, wasiNanos(stat.atim_ns));
+    try memory.write(u64, ptr, 48, wasiNanos(stat.mtim_ns));
+    try memory.write(u64, ptr, 56, wasiNanos(stat.ctim_ns));
 }
 
 fn wasiFiletype(kind: std.Io.File.Kind) u8 {
@@ -1249,11 +1322,10 @@ pub fn path_filestat_get(ctx: *anyopaque, _: usize) anyerror!void {
             try pushErrno(vm, .NAMETOOLONG);
             return;
         };
-        var stat: posix.Stat = undefined;
-        if (std.c.fstatat(dir.handle, path_z.ptr, &stat, nofollow) != 0) {
+        const stat = fstatatToFileStat(dir.handle, path_z.ptr, nofollow) catch {
             try pushErrno(vm, cErrnoToWasi());
             return;
-        }
+        };
         try writeFilestatPosix(memory, filestat_ptr, stat);
     }
     try pushErrno(vm, .SUCCESS);
@@ -2683,9 +2755,10 @@ fn readTestFile(name: []const u8) ![]const u8 {
         const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
         if (fd < 0) continue;
         defer _ = std.c.close(fd);
-        var st: std.posix.Stat = undefined;
-        if (std.c.fstat(fd, &st) != 0) continue;
-        const size: usize = @intCast(st.size);
+        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
+        if (end < 0) continue;
+        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
+        const size: usize = @intCast(end);
         const data = try testing.allocator.alloc(u8, size);
         var filled: usize = 0;
         while (filled < size) {

@@ -512,9 +512,10 @@ const TestRunner = struct {
         const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
         if (fd < 0) return null;
         defer _ = std.c.close(fd);
-        var st: std.posix.Stat = undefined;
-        if (std.c.fstat(fd, &st) != 0) return null;
-        const size: usize = @intCast(st.size);
+        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
+        if (end < 0) return null;
+        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
+        const size: usize = @intCast(end);
         const bytes = self.allocator.alloc(u8, size) catch return null;
         var filled: usize = 0;
         while (filled < size) {
@@ -586,9 +587,10 @@ const TestRunner = struct {
         const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
         if (fd < 0) return error.FileNotFound;
         defer _ = std.c.close(fd);
-        var st: std.posix.Stat = undefined;
-        if (std.c.fstat(fd, &st) != 0) return error.StatFailed;
-        const size: usize = @intCast(st.size);
+        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
+        if (end < 0) return error.StatFailed;
+        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
+        const size: usize = @intCast(end);
         const content = try self.allocator.alloc(u8, size);
         defer self.allocator.free(content);
         var filled: usize = 0;

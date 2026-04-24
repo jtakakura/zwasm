@@ -27,11 +27,17 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "enable_component", enable_component);
     options.addOption([]const u8, "version", build_zon.version);
 
-    // Library module (for use as dependency and test root)
+    // Library module (for use as dependency and test root).
+    // link_libc is required because wasi.zig / cache.zig / platform.zig use
+    // `std.c.*` for POSIX operations that std.posix lost in Zig 0.16
+    // (fsync, mkdirat, unlinkat, renameat, dup, pread/pwrite, futimens, …).
+    // On Linux the build is strict about this; macOS happens to auto-link
+    // libc for `extern "c"` decls but both platforms need it.
     const mod = b.addModule("zwasm", .{
         .root_source_file = b.path("src/types.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     mod.addOptions("build_options", options);
 
@@ -49,6 +55,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/cli.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
     cli_mod.addOptions("build_options", options);
     const cli = b.addExecutable(.{
@@ -75,6 +82,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path(ex.src),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         });
         ex_mod.addImport("zwasm", mod);
         const ex_exe = b.addExecutable(.{
@@ -91,6 +99,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("test/e2e/e2e_runner.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         });
         e2e_mod.addImport("zwasm", mod);
         const e2e = b.addExecutable(.{
@@ -107,6 +116,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("bench/fib_bench.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         });
         bench_mod.addImport("zwasm", mod);
         const bench = b.addExecutable(.{
@@ -125,6 +135,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/fuzz_loader.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         });
         fuzz_mod.addImport("zwasm", mod);
         const fuzz = b.addExecutable(.{
@@ -137,6 +148,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/fuzz_wat_loader.zig"),
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         });
         fuzz_wat_mod.addImport("zwasm", mod);
         const fuzz_wat = b.addExecutable(.{

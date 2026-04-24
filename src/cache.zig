@@ -235,9 +235,12 @@ pub fn loadFromFile(alloc: Allocator, hash: [32]u8) !?[]?*IrFunc {
     const fd = std.c.open(@ptrCast(&path_z), flags, @as(std.c.mode_t, 0));
     if (fd < 0) return null;
     defer _ = std.c.close(fd);
-    var stat: std.posix.Stat = undefined;
-    if (std.c.fstat(fd, &stat) != 0) return null;
-    const size_u64: u64 = @bitCast(@as(i64, @intCast(stat.size)));
+    // `std.c.fstat` is unavailable on Linux in Zig 0.16 — use lseek for size
+    // (cache files are regular seekable files, so SEEK_END is reliable).
+    const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
+    if (end < 0) return null;
+    _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
+    const size_u64: u64 = @intCast(end);
     if (size_u64 > 256 * 1024 * 1024) return null; // sanity limit: 256 MB
     const data = try alloc.alloc(u8, @intCast(size_u64));
     defer alloc.free(data);

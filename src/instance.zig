@@ -704,9 +704,10 @@ fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
         const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
         if (fd < 0) continue;
         defer _ = std.c.close(fd);
-        var st: std.posix.Stat = undefined;
-        if (std.c.fstat(fd, &st) != 0) continue;
-        const size: usize = @intCast(st.size);
+        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
+        if (end < 0) continue;
+        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
+        const size: usize = @intCast(end);
         const data = try alloc.alloc(u8, size);
         var filled: usize = 0;
         while (filled < size) {
