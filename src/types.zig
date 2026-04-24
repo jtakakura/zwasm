@@ -307,7 +307,7 @@ pub const WasmModule = struct {
     }
 
     /// Apply WasiOptions to a WasiContext (shared logic for all WASI loaders).
-    fn applyWasiOptions(wc: *rt.wasi.WasiContext, opts: WasiOptions) !void {
+    fn applyWasiOptions(wc: *rt.wasi.WasiContext, io: std.Io, opts: WasiOptions) !void {
         wc.caps = opts.caps;
         if (opts.args.len > 0) wc.setArgs(opts.args);
 
@@ -320,7 +320,7 @@ pub const WasmModule = struct {
         for (opts.preopen_paths, 0..) |path, i| {
             const fd: i32 = @intCast(3 + i);
             const spec = splitPreopenSpec(path);
-            wc.addPreopenPath(fd, spec.guest, spec.host) catch continue;
+            wc.addPreopenPath(io, fd, spec.guest, spec.host) catch continue;
         }
 
         // FD-based preopens (fd auto-assigned after path-based ones)
@@ -464,6 +464,23 @@ pub const WasmModule = struct {
         errdefer self.module.deinit();
         try self.module.decode();
 
+        // Io acquisition per D135: use caller-supplied io if any, otherwise
+        // stand up a private `std.Io.Threaded` owned by this module.
+        // Acquired early — applyWasiOptions's addPreopenPath needs io to open
+        // host directories cross-platform (Zig 0.16's `std.Io.Dir.openDir`).
+        const io: std.Io = blk: {
+            if (config.io) |io_val| break :blk io_val;
+            const threaded = try allocator.create(std.Io.Threaded);
+            errdefer allocator.destroy(threaded);
+            threaded.* = std.Io.Threaded.init(allocator, .{});
+            self.owned_io = threaded;
+            break :blk threaded.io();
+        };
+        errdefer if (self.owned_io) |t| {
+            t.deinit();
+            allocator.destroy(t);
+        };
+
         if (config.wasi) {
             try rt.wasi.registerAll(&self.store, &self.module);
             self.wasi_ctx = rt.wasi.WasiContext.init(allocator);
@@ -475,7 +492,7 @@ pub const WasmModule = struct {
 
         if (self.wasi_ctx) |*wc| {
             if (config.wasi_options) |opts| {
-                try applyWasiOptions(wc, opts);
+                try applyWasiOptions(wc, io, opts);
             }
         }
 
@@ -495,22 +512,7 @@ pub const WasmModule = struct {
         self.vm = try allocator.create(rt.vm_mod.Vm);
         errdefer if (self.vm) |vm| allocator.destroy(vm);
         self.vm.?.* = rt.vm_mod.Vm.init(allocator);
-
-        // Io acquisition per D135: use caller-supplied io if any, otherwise
-        // stand up a private `std.Io.Threaded` owned by this module.
-        if (config.io) |io_val| {
-            self.vm.?.io = io_val;
-        } else {
-            const threaded = try allocator.create(std.Io.Threaded);
-            errdefer allocator.destroy(threaded);
-            threaded.* = std.Io.Threaded.init(allocator, .{});
-            self.owned_io = threaded;
-            self.vm.?.io = threaded.io();
-        }
-        errdefer if (self.owned_io) |t| {
-            t.deinit();
-            allocator.destroy(t);
-        };
+        self.vm.?.io = io;
 
         self.max_memory_bytes = config.max_memory_bytes;
         self.force_interpreter = config.force_interpreter;

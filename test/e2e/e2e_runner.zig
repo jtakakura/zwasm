@@ -505,27 +505,15 @@ const TestRunner = struct {
     fn loadWasmFile(self: *TestRunner, filename: []const u8) ?[]const u8 {
         const path = std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ self.dir, filename }) catch return null;
         defer self.allocator.free(path);
-        var path_z: [std.posix.PATH_MAX]u8 = undefined;
-        if (path.len >= path_z.len) return null;
-        @memcpy(path_z[0..path.len], path);
-        path_z[path.len] = 0;
-        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-        if (fd < 0) return null;
-        defer _ = std.c.close(fd);
-        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-        if (end < 0) return null;
-        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-        const size: usize = @intCast(end);
-        const bytes = self.allocator.alloc(u8, size) catch return null;
-        var filled: usize = 0;
-        while (filled < size) {
-            const rc = std.c.read(fd, bytes.ptr + filled, size - filled);
-            if (rc <= 0) {
-                self.allocator.free(bytes);
-                return null;
-            }
-            filled += @intCast(rc);
-        }
+        const io = self.vm.io;
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return null;
+        defer file.close(io);
+        const size = file.length(io) catch return null;
+        const bytes = self.allocator.alloc(u8, @intCast(size)) catch return null;
+        _ = file.readPositionalAll(io, bytes, 0) catch {
+            self.allocator.free(bytes);
+            return null;
+        };
         return bytes;
     }
 
@@ -580,26 +568,13 @@ const TestRunner = struct {
         const old_failed = self.failed;
         const old_skipped = self.skipped;
 
-        var path_z: [std.posix.PATH_MAX]u8 = undefined;
-        if (json_path.len >= path_z.len) return error.NameTooLong;
-        @memcpy(path_z[0..json_path.len], json_path);
-        path_z[json_path.len] = 0;
-        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-        if (fd < 0) return error.FileNotFound;
-        defer _ = std.c.close(fd);
-        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-        if (end < 0) return error.StatFailed;
-        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-        const size: usize = @intCast(end);
-        const content = try self.allocator.alloc(u8, size);
+        const io = self.vm.io;
+        const file = std.Io.Dir.cwd().openFile(io, json_path, .{}) catch return error.FileNotFound;
+        defer file.close(io);
+        const size = file.length(io) catch return error.StatFailed;
+        const content = try self.allocator.alloc(u8, @intCast(size));
         defer self.allocator.free(content);
-        var filled: usize = 0;
-        while (filled < size) {
-            const rc = std.c.read(fd, content.ptr + filled, size - filled);
-            if (rc <= 0) return error.IncompleteRead;
-            filled += @intCast(rc);
-        }
-        const read = filled;
+        const read = file.readPositionalAll(io, content, 0) catch return error.IncompleteRead;
 
         const parsed = std.json.parseFromSlice(JsonTestFile, self.allocator, content[0..read], .{
             .ignore_unknown_fields = true,

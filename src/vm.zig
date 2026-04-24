@@ -8480,32 +8480,22 @@ fn roundToEven(comptime T: type, x: T) T {
 const testing = std.testing;
 
 fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     const prefixes = [_][]const u8{ "src/testdata/", "testdata/", "src/wasm/testdata/" };
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        var path_z: [std.posix.PATH_MAX]u8 = undefined;
-        if (path.len >= path_z.len) continue;
-        @memcpy(path_z[0..path.len], path);
-        path_z[path.len] = 0;
-        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-        if (fd < 0) continue;
-        defer _ = std.c.close(fd);
-        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-        if (end < 0) continue;
-        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-        const size: usize = @intCast(end);
-        const data = try alloc.alloc(u8, size);
-        var filled: usize = 0;
-        while (filled < size) {
-            const rc = std.c.read(fd, data.ptr + filled, size - filled);
-            if (rc <= 0) {
-                alloc.free(data);
-                return error.ReadFailed;
-            }
-            filled += @intCast(rc);
-        }
-        return data[0..filled];
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try alloc.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            alloc.free(data);
+            return error.ReadFailed;
+        };
+        return data[0..n];
     }
     return error.FileNotFound;
 }
@@ -9538,31 +9528,22 @@ test "Tiered — back-edge counting triggers JIT for single-call loop function" 
     // sieve(100) is called once but has a hot inner loop.
     // Back-edge counting should trigger JIT mid-execution and restart via JIT.
     const wasm = blk: {
+        var th = std.Io.Threaded.init(testing.allocator, .{});
+        defer th.deinit();
+        const io = th.io();
         const prefixes = [_][]const u8{ "bench/wasm/", "../bench/wasm/" };
         for (prefixes) |prefix| {
             const path = try std.fmt.allocPrint(testing.allocator, "{s}sieve.wasm", .{prefix});
             defer testing.allocator.free(path);
-            var path_z: [std.posix.PATH_MAX]u8 = undefined;
-            if (path.len >= path_z.len) continue;
-            @memcpy(path_z[0..path.len], path);
-            path_z[path.len] = 0;
-            const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-            if (fd < 0) continue;
-            defer _ = std.c.close(fd);
-            const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-            if (end < 0) continue;
-            _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-            const size: usize = @intCast(end);
-            const data = try testing.allocator.alloc(u8, size);
-            var filled: usize = 0;
-            while (filled < size) {
-                const rc = std.c.read(fd, data.ptr + filled, size - filled);
-                if (rc <= 0) {
-                    testing.allocator.free(data);
-                    return error.SkipZigTest;
-                }
-                filled += @intCast(rc);
-            }
+            const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+            defer file.close(io);
+            const size = file.length(io) catch continue;
+            const data = try testing.allocator.alloc(u8, @intCast(size));
+            const n = file.readPositionalAll(io, data, 0) catch {
+                testing.allocator.free(data);
+                return error.SkipZigTest;
+            };
+            const filled = n;
             break :blk data[0..filled];
         }
         return error.SkipZigTest; // sieve.wasm not found

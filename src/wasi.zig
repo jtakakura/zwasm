@@ -334,19 +334,15 @@ pub const WasiContext = struct {
         });
     }
 
-    pub fn addPreopenPath(self: *WasiContext, wasi_fd: i32, guest_path: []const u8, host_path: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            return error.Unexpected;
-        }
-        var path_buf: [std.posix.PATH_MAX]u8 = undefined;
-        if (host_path.len >= path_buf.len) return error.NameTooLong;
-        @memcpy(path_buf[0..host_path.len], host_path);
-        path_buf[host_path.len] = 0;
-        const flags: std.posix.O = .{ .ACCMODE = .RDONLY, .DIRECTORY = true };
-        const raw_fd = std.c.open(@ptrCast(&path_buf), flags, @as(std.c.mode_t, 0));
-        if (raw_fd < 0) return error.AccessDenied;
-        errdefer _ = std.c.close(raw_fd);
-        try self.addPreopen(wasi_fd, guest_path, .{ .handle = raw_fd });
+    pub fn addPreopenPath(self: *WasiContext, io: std.Io, wasi_fd: i32, guest_path: []const u8, host_path: []const u8) !void {
+        // Cross-platform via `std.Io.Dir.openDir` — Windows gets real support,
+        // POSIX reduces to the same openat+O_DIRECTORY under the hood.
+        const opened = if (std.fs.path.isAbsolute(host_path))
+            try std.Io.Dir.openDirAbsolute(io, host_path, .{ .access_sub_paths = true, .iterate = true })
+        else
+            try std.Io.Dir.cwd().openDir(io, host_path, .{ .access_sub_paths = true, .iterate = true });
+        errdefer opened.close(io);
+        try self.addPreopen(wasi_fd, guest_path, opened);
     }
 
     /// Register an existing host file descriptor as a preopened entry.
@@ -2809,31 +2805,21 @@ fn readTestFile(name: []const u8) ![]const u8 {
         "testdata/",
         "src/wasm/testdata/",
     };
+    var th = std.Io.Threaded.init(testing.allocator, .{});
+    defer th.deinit();
+    const io = th.io();
     for (&paths) |prefix| {
         const path = try std.fmt.allocPrint(testing.allocator, "{s}{s}", .{ prefix, name });
         defer testing.allocator.free(path);
-        var path_z: [std.posix.PATH_MAX]u8 = undefined;
-        if (path.len >= path_z.len) continue;
-        @memcpy(path_z[0..path.len], path);
-        path_z[path.len] = 0;
-        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-        if (fd < 0) continue;
-        defer _ = std.c.close(fd);
-        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-        if (end < 0) continue;
-        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-        const size: usize = @intCast(end);
-        const data = try testing.allocator.alloc(u8, size);
-        var filled: usize = 0;
-        while (filled < size) {
-            const rc = std.c.read(fd, data.ptr + filled, size - filled);
-            if (rc <= 0) {
-                testing.allocator.free(data);
-                return error.ReadFailed;
-            }
-            filled += @intCast(rc);
-        }
-        return data[0..filled];
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try testing.allocator.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            testing.allocator.free(data);
+            return error.ReadFailed;
+        };
+        return data[0..n];
     }
     return error.FileNotFound;
 }
@@ -3157,7 +3143,7 @@ test "WASI — path_open creates file and returns valid fd" {
     defer tmp.cleanup();
     const host_path = try std.fmt.allocPrint(alloc, ".zig-cache/tmp/{s}", .{tmp.sub_path});
     defer alloc.free(host_path);
-    try wasi_ctx.addPreopenPath(3, "/tmp", host_path);
+    try wasi_ctx.addPreopenPath(th.io(), 3, "/tmp", host_path);
 
     try instance.instantiate();
 
@@ -3264,7 +3250,7 @@ test "WASI — fd_readdir lists directory entries" {
 
     // Reopen dir fd for reading
     const read_dir_fd = try tmp.dir.openDir(io, test_dir, .{ .access_sub_paths = true, .iterate = true });
-    try wasi_ctx.addPreopenPath(3, "/tmp", host_path);
+    try wasi_ctx.addPreopenPath(th.io(), 3, "/tmp", host_path);
     // Put the dir fd in fd_table
     const wasi_dir_fd = try wasi_ctx.allocFd(.{
         .raw = read_dir_fd.handle,
@@ -3475,9 +3461,12 @@ test "addPreopenFd: registers fd-based preopen" {
     var ctx = WasiContext.init(alloc);
     defer ctx.deinit();
 
-    // Open a real directory to get a valid fd
-    const dir_fd = std.c.open(".", std.posix.O{ .ACCMODE = .RDONLY, .DIRECTORY = true }, @as(std.c.mode_t, 0));
-    if (dir_fd < 0) return error.SkipZigTest;
+    // Open a real directory to get a valid fd (cross-platform via Io.Dir).
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
+    const opened = std.Io.Dir.cwd().openDir(io, ".", .{}) catch return error.SkipZigTest;
+    const dir_fd = opened.handle;
 
     try ctx.addPreopenFd(3, "/sandbox", dir_fd, .dir, .own);
 

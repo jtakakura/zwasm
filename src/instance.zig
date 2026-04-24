@@ -693,32 +693,22 @@ pub fn evalInitExpr(expr: []const u8, instance: *Instance) !u128 {
 const testing = std.testing;
 
 fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     const prefixes = [_][]const u8{ "src/testdata/", "testdata/", "src/wasm/testdata/" };
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        var path_z: [std.posix.PATH_MAX]u8 = undefined;
-        if (path.len >= path_z.len) continue;
-        @memcpy(path_z[0..path.len], path);
-        path_z[path.len] = 0;
-        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-        if (fd < 0) continue;
-        defer _ = std.c.close(fd);
-        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-        if (end < 0) continue;
-        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-        const size: usize = @intCast(end);
-        const data = try alloc.alloc(u8, size);
-        var filled: usize = 0;
-        while (filled < size) {
-            const rc = std.c.read(fd, data.ptr + filled, size - filled);
-            if (rc <= 0) {
-                alloc.free(data);
-                return error.ReadFailed;
-            }
-            filled += @intCast(rc);
-        }
-        return data[0..filled];
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try alloc.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            alloc.free(data);
+            return error.ReadFailed;
+        };
+        return data[0..n];
     }
     return error.FileNotFound;
 }

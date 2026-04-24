@@ -1327,31 +1327,21 @@ fn readTestFile(alloc: Allocator, name: []const u8) ![]const u8 {
         "testdata/",
         "src/wasm/testdata/",
     };
+    var th = std.Io.Threaded.init(alloc, .{});
+    defer th.deinit();
+    const io = th.io();
     for (prefixes) |prefix| {
         const path = try std.fmt.allocPrint(alloc, "{s}{s}", .{ prefix, name });
         defer alloc.free(path);
-        var path_z: [std.posix.PATH_MAX]u8 = undefined;
-        if (path.len >= path_z.len) continue;
-        @memcpy(path_z[0..path.len], path);
-        path_z[path.len] = 0;
-        const fd = std.c.open(@ptrCast(&path_z), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-        if (fd < 0) continue;
-        defer _ = std.c.close(fd);
-        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-        if (end < 0) continue;
-        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-        const size: usize = @intCast(end);
-        const data = try alloc.alloc(u8, size);
-        var filled: usize = 0;
-        while (filled < size) {
-            const rc = std.c.read(fd, data.ptr + filled, size - filled);
-            if (rc <= 0) {
-                alloc.free(data);
-                return error.ReadFailed;
-            }
-            filled += @intCast(rc);
-        }
-        return data[0..filled];
+        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch continue;
+        defer file.close(io);
+        const size = file.length(io) catch continue;
+        const data = try alloc.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, data, 0) catch {
+            alloc.free(data);
+            return error.ReadFailed;
+        };
+        return data[0..n];
     }
     return error.FileNotFound;
 }
@@ -1918,28 +1908,19 @@ test "Module — type canonicalization: ref_test.1 GC struct types" {
     //   7: sub(6) struct(i32, i32)     — $t4
     //   8: func() -> ()
     const wasm = blk: {
-        const p = "test/spec/json/ref_test.1.wasm";
-        var pz: [std.posix.PATH_MAX]u8 = undefined;
-        @memcpy(pz[0..p.len], p);
-        pz[p.len] = 0;
-        const fd = std.c.open(@ptrCast(&pz), std.posix.O{ .ACCMODE = .RDONLY }, @as(std.c.mode_t, 0));
-        if (fd < 0) return error.SkipZigTest;
-        defer _ = std.c.close(fd);
-        const end = std.c.lseek(fd, 0, std.posix.SEEK.END);
-        if (end < 0) return error.SkipZigTest;
-        _ = std.c.lseek(fd, 0, std.posix.SEEK.SET);
-        const size: usize = @intCast(end);
-        const buf = try testing.allocator.alloc(u8, size);
-        var filled: usize = 0;
-        while (filled < size) {
-            const rc = std.c.read(fd, buf.ptr + filled, size - filled);
-            if (rc <= 0) {
-                testing.allocator.free(buf);
-                return error.SkipZigTest;
-            }
-            filled += @intCast(rc);
-        }
-        break :blk buf[0..filled];
+        var th = std.Io.Threaded.init(testing.allocator, .{});
+        defer th.deinit();
+        const io = th.io();
+        const file = std.Io.Dir.cwd().openFile(io, "test/spec/json/ref_test.1.wasm", .{}) catch
+            return error.SkipZigTest;
+        defer file.close(io);
+        const size = file.length(io) catch return error.SkipZigTest;
+        const buf = try testing.allocator.alloc(u8, @intCast(size));
+        const n = file.readPositionalAll(io, buf, 0) catch {
+            testing.allocator.free(buf);
+            return error.SkipZigTest;
+        };
+        break :blk buf[0..n];
     };
     defer testing.allocator.free(wasm);
     var m = Module.init(testing.allocator, wasm);
