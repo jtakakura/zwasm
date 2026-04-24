@@ -5,8 +5,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-04-24
+
 ### Changed
 - `invoke`/`invokeInterpreterOnly` now return `error.ModuleNotFullyLoaded` if the underlying VM is uninitialized (e.g., after OOM in `loadLinked`). This is a new error variant in the public API. Embedders matching on specific errors should handle this case. See API docs for details. (PR #40 by @jtakakura, closes #39)
+
+### Fixed
+- `WasmModule.cancel()` no longer segfaults on a partially-loaded module (`vm == null` after OOM in `loadLinked`). Matches the C API contract that documents cancel as a no-op on idle modules.
 
 ## [1.9.0] - 2026-04-24
 
