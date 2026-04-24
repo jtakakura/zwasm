@@ -534,19 +534,14 @@ pub const WasmModule = struct {
     /// Returns `error.ModuleNotFullyLoaded` if the underlying VM is null (e.g.,
     /// after OOM in `loadLinked`).
     pub fn invoke(self: *WasmModule, name: []const u8, args: []const u64, results: []u64) !void {
-        if (self.vm) |vm| {
-            vm.reset();
-            if (self.fuel) |f| vm.fuel = f;
-            if (self.max_memory_bytes) |mb| vm.max_memory_bytes = mb;
-            if (self.force_interpreter) |fi| vm.force_interpreter = fi;
-            if (self.timeout_ms) |ms| vm.setDeadlineTimeoutMs(ms);
-            defer if (self.fuel != null) {
-                self.fuel = vm.fuel;
-            };
-            try vm.invoke(&self.instance, name, args, results);
-        } else {
-            return error.ModuleNotFullyLoaded;
-        }
+        const vm = self.vm orelse return error.ModuleNotFullyLoaded;
+        vm.reset();
+        if (self.fuel) |f| vm.fuel = f;
+        if (self.max_memory_bytes) |mb| vm.max_memory_bytes = mb;
+        if (self.force_interpreter) |fi| vm.force_interpreter = fi;
+        if (self.timeout_ms) |ms| vm.setDeadlineTimeoutMs(ms);
+        defer if (self.fuel != null) { self.fuel = vm.fuel; };
+        try vm.invoke(&self.instance, name, args, results);
     }
 
     /// Invoke using only the stack-based interpreter, bypassing RegIR and JIT.
@@ -555,21 +550,16 @@ pub const WasmModule = struct {
     /// mode selection — whether set via `module.force_interpreter` or directly
     /// on `module.vm.force_interpreter` — survives a diagnostic interpreter call.
     pub fn invokeInterpreterOnly(self: *WasmModule, name: []const u8, args: []const u64, results: []u64) !void {
-        if (self.vm) |vm| {
-            vm.reset();
-            if (self.fuel) |f| vm.fuel = f;
-            if (self.max_memory_bytes) |mb| vm.max_memory_bytes = mb;
-            if (self.timeout_ms) |ms| vm.setDeadlineTimeoutMs(ms);
-            const saved_fi = vm.force_interpreter;
-            vm.force_interpreter = true;
-            defer vm.force_interpreter = saved_fi;
-            defer if (self.fuel != null) {
-                self.fuel = vm.fuel;
-            };
-            try vm.invoke(&self.instance, name, args, results);
-        } else {
-            return error.ModuleNotFullyLoaded;
-        }
+        const vm = self.vm orelse return error.ModuleNotFullyLoaded;
+        vm.reset();
+        if (self.fuel) |f| vm.fuel = f;
+        if (self.max_memory_bytes) |mb| vm.max_memory_bytes = mb;
+        if (self.timeout_ms) |ms| vm.setDeadlineTimeoutMs(ms);
+        const saved_fi = vm.force_interpreter;
+        vm.force_interpreter = true;
+        defer vm.force_interpreter = saved_fi;
+        defer if (self.fuel != null) { self.fuel = vm.fuel; };
+        try vm.invoke(&self.instance, name, args, results);
     }
 
     /// Request cancellation of the currently executing Wasm function.
@@ -581,7 +571,7 @@ pub const WasmModule = struct {
     /// every `invoke()`, so requests issued while the module is idle are
     /// dropped — the host must race the cancel against a live invocation.
     pub fn cancel(self: *WasmModule) void {
-        self.vm.cancel();
+        if (self.vm) |vm| vm.cancel();
     }
 
     /// Read bytes from linear memory at the given offset.
