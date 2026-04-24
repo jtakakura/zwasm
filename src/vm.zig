@@ -709,7 +709,7 @@ pub const Vm = struct {
                         if (tc.dump_regir_func) |dump_idx| {
                             if (dump_idx == wf.func_idx) {
                                 var err_buf2: [4096]u8 = undefined;
-                                var ew = std.fs.File.stderr().writer(&err_buf2);
+                                var ew = std.Io.File.stderr().writer(&err_buf2);
                                 trace_mod.dumpRegIR(&ew.interface, reg, wf.ir.?.pool64, wf.func_idx);
                                 tc.dump_regir_func = null;
                             }

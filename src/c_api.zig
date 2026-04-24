@@ -19,7 +19,7 @@ const WasmModule = types.WasmModule;
 const WasiOptions = types.WasiOptions;
 
 /// Convert isize (C intptr_t) to platform File.Handle.
-fn isizeToHandle(v: isize) std.fs.File.Handle {
+fn isizeToHandle(v: isize) std.Io.File.Handle {
     if (builtin.os.tag == .windows) {
         return @ptrFromInt(@as(usize, @bitCast(v)));
     } else {
@@ -426,7 +426,7 @@ export fn zwasm_module_new_wasi_configured2(
         };
     }
 
-    var stdio_fds2: [3]?std.fs.File.Handle = .{ null, null, null };
+    var stdio_fds2: [3]?std.Io.File.Handle = .{ null, null, null };
     var stdio_ownership2: [3]wasi.Ownership = .{ .borrow, .borrow, .borrow };
     for (0..3) |idx| {
         if (wasi_config.stdio_fds[idx] >= 0) {
@@ -761,7 +761,7 @@ export fn zwasm_module_new_wasi_configured(
     }
 
     // Stdio overrides
-    var stdio_fds: [3]?std.fs.File.Handle = .{ null, null, null };
+    var stdio_fds: [3]?std.Io.File.Handle = .{ null, null, null };
     var stdio_ownership: [3]wasi.Ownership = .{ .borrow, .borrow, .borrow };
     for (0..3) |idx| {
         if (config.stdio_fds[idx] >= 0) {

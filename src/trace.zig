@@ -62,7 +62,7 @@ pub fn parseCategories(input: []const u8) u8 {
 
 fn stderrPrint(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
-    var w = std.fs.File.stderr().writer(&buf);
+    var w = std.Io.File.stderr().writer(&buf);
     w.interface.print(fmt, args) catch {};
     w.interface.flush() catch {};
 }
@@ -425,7 +425,7 @@ pub fn dumpJitCode(
     func_idx: u32,
 ) void {
     var buf: [4096]u8 = undefined;
-    var ew = std.fs.File.stderr().writer(&buf);
+    var ew = std.Io.File.stderr().writer(&buf);
     const w = &ew.interface;
 
     const code_bytes = code_items.len * 4;
@@ -606,6 +606,6 @@ test "dumpRegIR: basic output" {
 
     // Write to stderr (verifies no crash, output format tested manually)
     var err_buf: [4096]u8 = undefined;
-    var ew = std.fs.File.stderr().writer(&err_buf);
+    var ew = std.Io.File.stderr().writer(&err_buf);
     dumpRegIR(&ew.interface, &reg_func, &.{}, 5);
 }

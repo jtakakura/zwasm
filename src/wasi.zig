@@ -145,10 +145,10 @@ pub const HandleKind = enum {
 };
 
 const HostHandle = struct {
-    raw: std.fs.File.Handle,
+    raw: std.Io.File.Handle,
     kind: HandleKind,
 
-    fn file(self: HostHandle) std.fs.File {
+    fn file(self: HostHandle) std.Io.File {
         return .{ .handle = self.raw };
     }
 
@@ -166,7 +166,7 @@ const HostHandle = struct {
         }
     }
 
-    fn stat(self: HostHandle) !std.fs.File.Stat {
+    fn stat(self: HostHandle) !std.Io.File.Stat {
         return switch (self.kind) {
             .file => self.file().stat(),
             .dir => self.dir().stat(),
@@ -269,7 +269,7 @@ pub const WasiContext = struct {
     caps: Capabilities = .{}, // deny-by-default
 
     // Stdio override: per-fd custom handle (null = use process default)
-    stdio_handles: [3]?std.fs.File.Handle = .{ null, null, null },
+    stdio_handles: [3]?std.Io.File.Handle = .{ null, null, null },
     stdio_ownership: [3]Ownership = .{ .borrow, .borrow, .borrow },
 
     pub fn init(alloc: Allocator) WasiContext {
@@ -283,8 +283,8 @@ pub const WasiContext = struct {
         };
     }
 
-    fn closeHandle(handle: std.fs.File.Handle) void {
-        const f = std.fs.File{ .handle = handle };
+    fn closeHandle(handle: std.Io.File.Handle) void {
+        const f = std.Io.File{ .handle = handle };
         f.close();
     }
 
@@ -340,7 +340,7 @@ pub const WasiContext = struct {
     }
 
     /// Register an existing host file descriptor as a preopened entry.
-    pub fn addPreopenFd(self: *WasiContext, wasi_fd: i32, guest_path: []const u8, host_fd: std.fs.File.Handle, kind: HandleKind, ownership: Ownership) !void {
+    pub fn addPreopenFd(self: *WasiContext, wasi_fd: i32, guest_path: []const u8, host_fd: std.Io.File.Handle, kind: HandleKind, ownership: Ownership) !void {
         try self.preopens.append(self.alloc, .{
             .wasi_fd = wasi_fd,
             .path = guest_path,
@@ -350,7 +350,7 @@ pub const WasiContext = struct {
     }
 
     /// Override a stdio file descriptor (0=stdin, 1=stdout, 2=stderr).
-    pub fn setStdioFd(self: *WasiContext, fd: i32, host_fd: std.fs.File.Handle, ownership: Ownership) void {
+    pub fn setStdioFd(self: *WasiContext, fd: i32, host_fd: std.Io.File.Handle, ownership: Ownership) void {
         const idx: usize = @intCast(fd);
         if (idx >= 3) return;
         // Close previous owned override if any
@@ -362,7 +362,7 @@ pub const WasiContext = struct {
     }
 
     /// Resolve a stdio fd (0-2) to a File, using override if set.
-    pub fn stdioFile(self: *const WasiContext, fd: i32) ?std.fs.File {
+    pub fn stdioFile(self: *const WasiContext, fd: i32) ?std.Io.File {
         if (fd < 0 or fd > 2) return null;
         const idx: usize = @intCast(fd);
         if (self.stdio_handles[idx]) |handle| {
@@ -384,7 +384,7 @@ pub const WasiContext = struct {
         return null;
     }
 
-    fn getHostFd(self: *WasiContext, wasi_fd: i32) ?std.fs.File.Handle {
+    fn getHostFd(self: *WasiContext, wasi_fd: i32) ?std.Io.File.Handle {
         if (self.stdioFile(wasi_fd)) |file| return file.handle;
         const host = self.getHostHandle(wasi_fd) orelse return null;
         return host.raw;
@@ -397,7 +397,7 @@ pub const WasiContext = struct {
         return &self.fd_table.items[idx];
     }
 
-    fn resolveFile(self: *WasiContext, wasi_fd: i32) ?std.fs.File {
+    fn resolveFile(self: *WasiContext, wasi_fd: i32) ?std.Io.File {
         return if (self.stdioFile(wasi_fd)) |file|
             file
         else if (self.getHostHandle(wasi_fd)) |host|
@@ -484,16 +484,16 @@ inline fn hasCap(vm: *Vm, comptime field: std.meta.FieldEnum(Capabilities)) bool
 
 /// Default stdio mapping (process stdin/stdout/stderr). Used as fallback
 /// when no WasiContext is available or no override is set.
-fn defaultStdioFile(fd: i32) ?std.fs.File {
+fn defaultStdioFile(fd: i32) ?std.Io.File {
     return switch (fd) {
-        0 => std.fs.File.stdin(),
-        1 => std.fs.File.stdout(),
-        2 => std.fs.File.stderr(),
+        0 => std.Io.File.stdin(),
+        1 => std.Io.File.stdout(),
+        2 => std.Io.File.stderr(),
         else => null,
     };
 }
 
-fn wasiFiletypeFromKind(kind: std.fs.File.Kind) u8 {
+fn wasiFiletypeFromKind(kind: std.Io.File.Kind) u8 {
     return switch (kind) {
         .directory => @intFromEnum(Filetype.DIRECTORY),
         .sym_link => @intFromEnum(Filetype.SYMBOLIC_LINK),
@@ -1114,8 +1114,8 @@ fn wasiTimestamp(fst_flags: u32, set_bit: u32, now_bit: u32, provided_ns: i64, f
 }
 
 /// Write a WASI filestat struct (64 bytes) from a portable file stat to memory.
-/// Note: nlink is always 1 because std.fs.File.Stat does not expose link count.
-fn writeFilestat(memory: *WasmMemory, ptr: u32, stat: std.fs.File.Stat) !void {
+/// Note: nlink is always 1 because std.Io.File.Stat does not expose link count.
+fn writeFilestat(memory: *WasmMemory, ptr: u32, stat: std.Io.File.Stat) !void {
     const data = memory.memory();
     if (ptr + 64 > data.len) return error.OutOfBoundsMemoryAccess;
     @memset(data[ptr .. ptr + 64], 0);
@@ -3141,15 +3141,15 @@ test "stdio override: default returns process stdio" {
     // Without overrides, stdioFile returns process stdin/stdout/stderr
     const stdin_file = ctx.stdioFile(0);
     try testing.expect(stdin_file != null);
-    try testing.expectEqual(std.fs.File.stdin().handle, stdin_file.?.handle);
+    try testing.expectEqual(std.Io.File.stdin().handle, stdin_file.?.handle);
 
     const stdout_file = ctx.stdioFile(1);
     try testing.expect(stdout_file != null);
-    try testing.expectEqual(std.fs.File.stdout().handle, stdout_file.?.handle);
+    try testing.expectEqual(std.Io.File.stdout().handle, stdout_file.?.handle);
 
     const stderr_file = ctx.stdioFile(2);
     try testing.expect(stderr_file != null);
-    try testing.expectEqual(std.fs.File.stderr().handle, stderr_file.?.handle);
+    try testing.expectEqual(std.Io.File.stderr().handle, stderr_file.?.handle);
 
     // Non-stdio fd returns null
     try testing.expect(ctx.stdioFile(3) == null);
@@ -3173,8 +3173,8 @@ test "stdio override: custom fd replaces default" {
     try testing.expectEqual(pipe[1], stdout_file.?.handle);
 
     // stdin and stderr remain default
-    try testing.expectEqual(std.fs.File.stdin().handle, ctx.stdioFile(0).?.handle);
-    try testing.expectEqual(std.fs.File.stderr().handle, ctx.stdioFile(2).?.handle);
+    try testing.expectEqual(std.Io.File.stdin().handle, ctx.stdioFile(0).?.handle);
+    try testing.expectEqual(std.Io.File.stderr().handle, ctx.stdioFile(2).?.handle);
 }
 
 test "stdio override: borrow mode does not close fd on deinit" {

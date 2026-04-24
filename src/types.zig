@@ -174,7 +174,7 @@ pub const Capabilities = rt.wasi.Capabilities;
 /// Options for configuring WASI modules.
 /// FD-based preopen entry: binds an existing host fd to a WASI guest path.
 pub const PreopenFd = struct {
-    host_fd: std.fs.File.Handle,
+    host_fd: std.Io.File.Handle,
     guest_path: []const u8,
     kind: rt.wasi.HandleKind,
     ownership: rt.wasi.Ownership,
@@ -192,7 +192,7 @@ pub const WasiOptions = struct {
     preopen_fds: []const PreopenFd = &.{},
     /// Stdio fd overrides (null = use process default).
     /// Index 0=stdin, 1=stdout, 2=stderr.
-    stdio_fds: [3]?std.fs.File.Handle = .{ null, null, null },
+    stdio_fds: [3]?std.Io.File.Handle = .{ null, null, null },
     stdio_ownership: [3]rt.wasi.Ownership = .{ .borrow, .borrow, .borrow },
     /// WASI capability flags. Default: cli_default (stdio, clock, random, proc_exit).
     /// Use `.caps = Capabilities.all` for full access.

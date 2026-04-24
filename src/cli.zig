@@ -24,25 +24,30 @@ const guard_mod = @import("guard.zig");
 const jit_mod = vm_mod.jit_mod;
 const cache_mod = @import("cache.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     // Install signal handler for JIT guard page OOB traps
     if (comptime jit_mod.jitSupported()) {
         guard_mod.installSignalHandler();
     }
 
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    // `init.gpa` is a DebugAllocator-backed allocator in Debug builds
+    // (leak-checked by start.zig) and the appropriate production allocator
+    // otherwise. `init.arena` is the process arena — args/environ live there.
+    const allocator = init.gpa;
+    const arena = init.arena.allocator();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args_z = try init.minimal.args.toSlice(arena);
+    // Command dispatch below operates on `[]const []const u8`; the sentinel
+    // on `[:0]const u8` is redundant here (we never compare-by-address).
+    const args = try arena.alloc([]const u8, args_z.len);
+    for (args_z, args) |src, *dst| dst.* = src;
 
     var buf: [8192]u8 = undefined;
-    var writer = std.fs.File.stdout().writer(&buf);
+    var writer = std.Io.File.stdout().writer(&buf);
     const stdout = &writer.interface;
 
     var err_buf: [4096]u8 = undefined;
-    var err_writer = std.fs.File.stderr().writer(&err_buf);
+    var err_writer = std.Io.File.stderr().writer(&err_buf);
     const stderr = &err_writer.interface;
 
     if (args.len < 2) {
@@ -1270,7 +1275,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
         module.vm.?.trace = &batch_trace_config;
     }
 
-    const stdin = std.fs.File.stdin();
+    const stdin = std.Io.File.stdin();
     var read_buf: [8192]u8 = undefined;
     var reader = stdin.reader(&read_buf);
     const r = &reader.interface;

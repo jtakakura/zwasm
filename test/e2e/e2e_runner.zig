@@ -731,7 +731,7 @@ pub fn main() !void {
     }
 
     var buf: [8192]u8 = undefined;
-    var writer = std.fs.File.stdout().writer(&buf);
+    var writer = std.Io.File.stdout().writer(&buf);
     const stdout = &writer.interface;
 
     if (file) |f| {
