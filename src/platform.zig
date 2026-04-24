@@ -68,8 +68,7 @@ pub fn commitPages(region: []align(page_size) u8, prot: Protection) PageError!vo
         return;
     }
 
-    const posix = std.posix;
-    posix.mprotect(region, protectionToPosix(prot)) catch return error.PermissionDenied;
+    try mprotectPosix(region, protectionToPosix(prot));
 }
 
 pub fn protectPages(region: []align(page_size) u8, prot: Protection) PageError!void {
@@ -84,8 +83,22 @@ pub fn protectPages(region: []align(page_size) u8, prot: Protection) PageError!v
         return;
     }
 
-    const posix = std.posix;
-    posix.mprotect(region, protectionToPosix(prot)) catch return error.PermissionDenied;
+    try mprotectPosix(region, protectionToPosix(prot));
+}
+
+fn mprotectPosix(region: []align(page_size) u8, prot: std.posix.PROT) PageError!void {
+    if (builtin.link_libc) {
+        if (std.c.mprotect(region.ptr, region.len, prot) != 0) return error.PermissionDenied;
+        return;
+    }
+    if (builtin.os.tag == .linux) {
+        const rc = std.os.linux.mprotect(region.ptr, region.len, prot);
+        switch (std.posix.errno(rc)) {
+            .SUCCESS => return,
+            else => return error.PermissionDenied,
+        }
+    }
+    return error.Unexpected;
 }
 
 pub fn freePages(region: []align(page_size) u8) void {
@@ -155,11 +168,11 @@ fn protectionToWin(prot: Protection) windows.DWORD {
     };
 }
 
-fn protectionToPosix(prot: Protection) u32 {
+fn protectionToPosix(prot: Protection) std.posix.PROT {
     return switch (prot) {
-        .none => @intCast(std.posix.PROT.NONE),
-        .read_write => @intCast(std.posix.PROT.READ | std.posix.PROT.WRITE),
-        .read_exec => @intCast(std.posix.PROT.READ | std.posix.PROT.EXEC),
+        .none => .{},
+        .read_write => .{ .READ = true, .WRITE = true },
+        .read_exec => .{ .READ = true, .EXEC = true },
     };
 }
 
