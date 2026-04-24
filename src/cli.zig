@@ -24,11 +24,21 @@ const guard_mod = @import("guard.zig");
 const jit_mod = vm_mod.jit_mod;
 const cache_mod = @import("cache.zig");
 
+/// Process-wide Io handle. Populated once at the top of `main` from the
+/// `std.process.Init` the compiler-generated entrypoint hands us, and read
+/// by the CLI's file-I/O helpers (`readFile`, etc.). A module-level var is
+/// acceptable here because a CLI invocation is single-process / single-io
+/// by construction; library code (vm.zig, module.zig, ...) carries its own
+/// `io` through explicit parameters rather than relying on this global.
+var cli_io: std.Io = undefined;
+
 pub fn main(init: std.process.Init) !void {
     // Install signal handler for JIT guard page OOB traps
     if (comptime jit_mod.jitSupported()) {
         guard_mod.installSignalHandler();
     }
+
+    cli_io = init.io;
 
     // `init.gpa` is a DebugAllocator-backed allocator in Debug builds
     // (leak-checked by start.zig) and the appropriate production allocator
@@ -2072,11 +2082,11 @@ test "features list has expected entries" {
 }
 
 fn readFile(allocator: Allocator, path: []const u8) ![]const u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const stat = try file.stat();
+    const file = try std.Io.Dir.cwd().openFile(cli_io, path, .{});
+    defer file.close(cli_io);
+    const stat = try file.stat(cli_io);
     const data = try allocator.alloc(u8, stat.size);
-    const read = try file.readAll(data);
+    const read = try file.readPositionalAll(cli_io, data, 0);
     return data[0..read];
 }
 
