@@ -135,7 +135,8 @@ pub fn appCacheDir(alloc: std.mem.Allocator, app_name: []const u8) ![]u8 {
         return std.fs.getAppDataDir(alloc, app_name);
     }
 
-    const home = std.posix.getenv("HOME") orelse return error.NoCacheDir;
+    const home_ptr = std.c.getenv("HOME") orelse return error.NoCacheDir;
+    const home = std.mem.span(home_ptr);
     return std.fmt.allocPrint(alloc, "{s}/.cache/{s}", .{ home, app_name });
 }
 
@@ -154,10 +155,14 @@ pub fn tempDirPath(alloc: std.mem.Allocator) ![]u8 {
 }
 
 fn envPath(alloc: std.mem.Allocator, name: []const u8) !?[]u8 {
-    return std.process.getEnvVarOwned(alloc, name) catch |err| switch (err) {
-        error.EnvironmentVariableNotFound => null,
-        else => err,
-    };
+    var name_buf: [256]u8 = undefined;
+    if (name.len >= name_buf.len) return error.OutOfMemory;
+    @memcpy(name_buf[0..name.len], name);
+    name_buf[name.len] = 0;
+    const val_ptr = std.c.getenv(@ptrCast(&name_buf)) orelse return null;
+    const val = std.mem.span(val_ptr);
+    if (val.len == 0) return null;
+    return try alloc.dupe(u8, val);
 }
 
 fn protectionToWin(prot: Protection) windows.DWORD {

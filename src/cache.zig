@@ -168,13 +168,21 @@ pub fn wasmHash(wasm_bin: []const u8) [32]u8 {
 pub fn getCacheDir(alloc: Allocator) ![]u8 {
     const path = try platform.appCacheDir(alloc, "zwasm");
     // Ensure directory exists
-    std.fs.makeDirAbsolute(path) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => {
+    var path_z: [std.posix.PATH_MAX]u8 = undefined;
+    if (path.len >= path_z.len) {
+        alloc.free(path);
+        return error.NoCacheDir;
+    }
+    @memcpy(path_z[0..path.len], path);
+    path_z[path.len] = 0;
+    const rc = std.c.mkdir(@ptrCast(&path_z), 0o777);
+    if (rc != 0) {
+        const e: std.posix.E = @enumFromInt(std.c._errno().*);
+        if (e != .EXIST) {
             alloc.free(path);
             return error.NoCacheDir;
-        },
-    };
+        }
+    }
     return path;
 }
 
@@ -199,23 +207,46 @@ pub fn saveToFile(alloc: Allocator, hash: [32]u8, ir_funcs: []const ?*const IrFu
     defer alloc.free(data);
     const path = try getCachePath(alloc, hash);
     defer alloc.free(path);
-    const file = try std.fs.createFileAbsolute(path, .{});
-    defer file.close();
-    try file.writeAll(data);
+    var path_z: [std.posix.PATH_MAX]u8 = undefined;
+    if (path.len >= path_z.len) return error.NameTooLong;
+    @memcpy(path_z[0..path.len], path);
+    path_z[path.len] = 0;
+    const flags: std.posix.O = .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true };
+    const fd = std.c.open(@ptrCast(&path_z), flags, @as(std.c.mode_t, 0o666));
+    if (fd < 0) return error.AccessDenied;
+    defer _ = std.c.close(fd);
+    var remaining: []const u8 = data;
+    while (remaining.len > 0) {
+        const rc = std.c.write(fd, remaining.ptr, remaining.len);
+        if (rc < 0) return error.WriteFailed;
+        remaining = remaining[@as(usize, @intCast(rc))..];
+    }
 }
 
 /// Load cached IR from disk. Returns null on miss or mismatch.
 pub fn loadFromFile(alloc: Allocator, hash: [32]u8) !?[]?*IrFunc {
     const path = getCachePath(alloc, hash) catch return null;
     defer alloc.free(path);
-    const file = std.fs.openFileAbsolute(path, .{}) catch return null;
-    defer file.close();
-    const stat = try file.stat();
-    if (stat.size > 256 * 1024 * 1024) return null; // sanity limit: 256 MB
-    const data = try alloc.alloc(u8, stat.size);
+    var path_z: [std.posix.PATH_MAX]u8 = undefined;
+    if (path.len >= path_z.len) return null;
+    @memcpy(path_z[0..path.len], path);
+    path_z[path.len] = 0;
+    const flags: std.posix.O = .{ .ACCMODE = .RDONLY };
+    const fd = std.c.open(@ptrCast(&path_z), flags, @as(std.c.mode_t, 0));
+    if (fd < 0) return null;
+    defer _ = std.c.close(fd);
+    var stat: std.posix.Stat = undefined;
+    if (std.c.fstat(fd, &stat) != 0) return null;
+    const size_u64: u64 = @bitCast(@as(i64, @intCast(stat.size)));
+    if (size_u64 > 256 * 1024 * 1024) return null; // sanity limit: 256 MB
+    const data = try alloc.alloc(u8, @intCast(size_u64));
     defer alloc.free(data);
-    const bytes_read = try file.readAll(data);
-    if (bytes_read != stat.size) return null;
+    var filled: usize = 0;
+    while (filled < data.len) {
+        const rc = std.c.read(fd, data.ptr + filled, data.len - filled);
+        if (rc <= 0) return null;
+        filled += @intCast(rc);
+    }
     return deserialize(alloc, data, hash);
 }
 

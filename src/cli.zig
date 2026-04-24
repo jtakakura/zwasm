@@ -488,6 +488,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
             .categories = trace_categories,
             .dump_regir_func = dump_regir_func,
             .dump_jit_func = dump_jit_func,
+            .io = cli_io,
         };
         if (trace_categories != 0 or dump_regir_func != null or dump_jit_func != null) {
             module.vm.?.trace = &trace_config;
@@ -636,6 +637,7 @@ fn cmdRun(allocator: Allocator, args: []const []const u8, stdout: *std.Io.Writer
             .categories = trace_categories,
             .dump_regir_func = dump_regir_func,
             .dump_jit_func = dump_jit_func,
+            .io = cli_io,
         };
         if (trace_categories != 0 or dump_regir_func != null or dump_jit_func != null) {
             module.vm.?.trace = &wasi_trace_config;
@@ -1280,6 +1282,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
         .categories = trace_categories,
         .dump_regir_func = dump_regir_func,
         .dump_jit_func = dump_jit_func,
+        .io = cli_io,
     };
     if (trace_categories != 0 or dump_regir_func != null or dump_jit_func != null) {
         module.vm.?.trace = &batch_trace_config;
@@ -1287,7 +1290,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
 
     const stdin = std.Io.File.stdin();
     var read_buf: [8192]u8 = undefined;
-    var reader = stdin.reader(&read_buf);
+    var reader = stdin.reader(cli_io, &read_buf);
     const r = &reader.interface;
 
     // Reusable buffers for args/results (400+ params needed for func-400-params test)
@@ -1338,7 +1341,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
             error.StreamTooLong => continue,
             else => break,
         } orelse break;
-        const line = std.mem.trimRight(u8, raw_line, "\r");
+        const line = std.mem.trimEnd(u8, raw_line, "\r");
 
         // Skip empty lines
         if (line.len == 0) continue;
@@ -1514,7 +1517,7 @@ fn cmdBatch(allocator: Allocator, wasm_bytes: []const u8, imports: []const types
             // Buffer invocations until thread_end
             while (true) {
                 const raw_tline = r.takeDelimiter('\n') catch break orelse break;
-                const tline = std.mem.trimRight(u8, raw_tline, "\r");
+                const tline = std.mem.trimEnd(u8, raw_tline, "\r");
                 if (std.mem.eql(u8, tline, "thread_end")) break;
                 if (!std.mem.startsWith(u8, tline, "invoke ")) continue;
                 // Parse: invoke <len>:<func> [args...]

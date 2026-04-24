@@ -300,17 +300,12 @@ pub const Memory = struct {
         mutex.unlock(io);
         defer mutex.lockUncancelable(io);
 
-        const timeout: std.Io.Timeout = .{ .ns = @intCast(timeout_ns) };
-        var timed_out = false;
+        // Compute absolute deadline so spurious wakeups don't extend the wait.
+        const start = std.Io.Timestamp.now(io, .awake);
+        const deadline_ts = start.addDuration(.{ .nanoseconds = @intCast(timeout_ns) });
+        const timeout: std.Io.Timeout = .{ .deadline = .{ .raw = deadline_ts, .clock = .awake } };
         while (true) {
-            io.futexWaitTimeout(u32, &cond.epoch.raw, epoch, timeout) catch |err| switch (err) {
-                error.Canceled => {
-                    timed_out = true;
-                },
-                error.Timeout => {
-                    timed_out = true;
-                },
-            };
+            io.futexWaitTimeout(u32, &cond.epoch.raw, epoch, timeout) catch {};
 
             epoch = cond.epoch.load(.acquire);
             // Try to consume a pending signal (mirrors stdlib waitInner).
@@ -323,7 +318,9 @@ pub const Memory = struct {
                     }, .acquire, .monotonic) orelse return false;
                 }
             }
-            if (timed_out) {
+            // No signal — either spurious wake or timeout. Check clock.
+            const now_ts = std.Io.Timestamp.now(io, .awake);
+            if (now_ts.nanoseconds >= deadline_ts.nanoseconds) {
                 _ = cond.state.fetchSub(.{ .waiters = 1, .signals = 0 }, .monotonic);
                 return true;
             }

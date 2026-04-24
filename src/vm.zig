@@ -473,7 +473,7 @@ pub const Vm = struct {
             if (value == 0) {
                 self.deadline_ns = null;
             } else {
-                self.deadline_ns = std.time.nanoTimestamp() + @as(i128, @intCast(value)) * std.time.ns_per_ms;
+                self.deadline_ns = std.Io.Timestamp.now(self.io, .awake).nanoseconds + @as(i128, @intCast(value)) * std.time.ns_per_ms;
             }
         } else {
             self.deadline_ns = null;
@@ -501,7 +501,7 @@ pub const Vm = struct {
                 }
                 // Check deadline (wal-clock time)
                 if (self.deadline_ns) |d| {
-                    if (std.time.nanoTimestamp() >= d) return error.TimeoutExceeded;
+                    if (std.Io.Timestamp.now(self.io, .awake).nanoseconds >= d) return error.TimeoutExceeded;
                 }
                 // Reset check counter
                 self.deadline_check_remaining = DEADLINE_CHECK_INTERVAL;
@@ -571,7 +571,7 @@ pub const Vm = struct {
 
         // Check wall-clock deadline
         if (vm.deadline_ns) |dl| {
-            if (std.time.nanoTimestamp() >= dl) return 10; // TimeoutExceeded
+            if (std.Io.Timestamp.now(vm.io, .awake).nanoseconds >= dl) return 10; // TimeoutExceeded
         }
 
         // Neither exhausted — re-arm and continue
@@ -716,7 +716,7 @@ pub const Vm = struct {
                         if (tc.dump_regir_func) |dump_idx| {
                             if (dump_idx == wf.func_idx) {
                                 var err_buf2: [4096]u8 = undefined;
-                                var ew = std.Io.File.stderr().writer(&err_buf2);
+                                var ew = std.Io.File.stderr().writer(self.io, &err_buf2);
                                 trace_mod.dumpRegIR(&ew.interface, reg, wf.ir.?.pool64, wf.func_idx);
                                 tc.dump_regir_func = null;
                             }
@@ -3184,85 +3184,85 @@ pub const Vm = struct {
             // ---- Extract / replace lane ----
             .i8x16_extract_lane_s => {
                 const lane = try reader.readByte();
-                const vec: @Vector(16, i8) = @bitCast(self.popV128());
-                try self.pushI32(@as(i32, vec[lane]));
+                const arr: [16]i8 = @bitCast(self.popV128());
+                try self.pushI32(@as(i32, arr[lane]));
             },
             .i8x16_extract_lane_u => {
                 const lane = try reader.readByte();
-                const vec: @Vector(16, u8) = @bitCast(self.popV128());
-                try self.push(@as(u64, vec[lane]));
+                const arr: [16]u8 = @bitCast(self.popV128());
+                try self.push(@as(u64, arr[lane]));
             },
             .i8x16_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u8 = @truncate(self.pop());
-                var vec: @Vector(16, u8) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [16]u8 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .i16x8_extract_lane_s => {
                 const lane = try reader.readByte();
-                const vec: @Vector(8, i16) = @bitCast(self.popV128());
-                try self.pushI32(@as(i32, vec[lane]));
+                const arr: [8]i16 = @bitCast(self.popV128());
+                try self.pushI32(@as(i32, arr[lane]));
             },
             .i16x8_extract_lane_u => {
                 const lane = try reader.readByte();
-                const vec: @Vector(8, u16) = @bitCast(self.popV128());
-                try self.push(@as(u64, vec[lane]));
+                const arr: [8]u16 = @bitCast(self.popV128());
+                try self.push(@as(u64, arr[lane]));
             },
             .i16x8_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u16 = @truncate(self.pop());
-                var vec: @Vector(8, u16) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [8]u16 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .i32x4_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(4, i32) = @bitCast(self.popV128());
-                try self.pushI32(vec[lane]);
+                const arr: [4]i32 = @bitCast(self.popV128());
+                try self.pushI32(arr[lane]);
             },
             .i32x4_replace_lane => {
                 const lane = try reader.readByte();
                 const val = self.popI32();
-                var vec: @Vector(4, i32) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [4]i32 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .i64x2_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(2, i64) = @bitCast(self.popV128());
-                try self.pushI64(vec[lane]);
+                const arr: [2]i64 = @bitCast(self.popV128());
+                try self.pushI64(arr[lane]);
             },
             .i64x2_replace_lane => {
                 const lane = try reader.readByte();
                 const val = self.popI64();
-                var vec: @Vector(2, i64) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [2]i64 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .f32x4_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(4, u32) = @bitCast(self.popV128());
-                try self.pushF32(@bitCast(vec[lane]));
+                const arr: [4]u32 = @bitCast(self.popV128());
+                try self.pushF32(@bitCast(arr[lane]));
             },
             .f32x4_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u32 = @bitCast(self.popF32());
-                var vec: @Vector(4, u32) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [4]u32 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             .f64x2_extract_lane => {
                 const lane = try reader.readByte();
-                const vec: @Vector(2, u64) = @bitCast(self.popV128());
-                try self.pushF64(@bitCast(vec[lane]));
+                const arr: [2]u64 = @bitCast(self.popV128());
+                try self.pushF64(@bitCast(arr[lane]));
             },
             .f64x2_replace_lane => {
                 const lane = try reader.readByte();
                 const val: u64 = @bitCast(self.popF64());
-                var vec: @Vector(2, u64) = @bitCast(self.popV128());
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                var arr: [2]u64 = @bitCast(self.popV128());
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
 
             // ---- Shuffle / swizzle ----
@@ -3281,14 +3281,14 @@ pub const Vm = struct {
                 try self.pushV128(@bitCast(@as(@Vector(16, u8), result)));
             },
             .i8x16_swizzle => {
-                const indices: @Vector(16, u8) = @bitCast(self.popV128());
+                const indices: [16]u8 = @bitCast(self.popV128());
                 const vec: [16]u8 = @bitCast(self.popV128());
                 var result: [16]u8 = undefined;
                 for (0..16) |i| {
                     const idx = indices[i];
                     result[i] = if (idx < 16) vec[idx] else 0;
                 }
-                try self.pushV128(@bitCast(@as(@Vector(16, u8), result)));
+                try self.pushV128(@bitCast(result));
             },
 
             // ---- Bitwise (36.3) ----
@@ -3853,14 +3853,14 @@ pub const Vm = struct {
 
             // ---- Relaxed SIMD (Wasm 3.0) ----
             .i8x16_relaxed_swizzle => {
-                const indices: @Vector(16, u8) = @bitCast(self.popV128());
+                const indices: [16]u8 = @bitCast(self.popV128());
                 const vec: [16]u8 = @bitCast(self.popV128());
                 var result: [16]u8 = undefined;
                 for (0..16) |i| {
                     const idx = indices[i];
                     result[i] = if (idx < 16) vec[idx] else 0;
                 }
-                try self.pushV128(@bitCast(@as(@Vector(16, u8), result)));
+                try self.pushV128(@bitCast(result));
             },
             .i32x4_relaxed_trunc_f32x4_s => {
                 const a: [4]f32 = @bitCast(self.popV128());
@@ -4014,8 +4014,8 @@ pub const Vm = struct {
             n.* = std.mem.readInt(NarrowT, ptr, .little);
         }
         // Extend to wide
-        var wide: @Vector(N, WideT) = undefined;
-        for (0..N) |i| {
+        var wide: [N]WideT = undefined;
+        inline for (0..N) |i| {
             wide[i] = @as(WideT, narrow[i]);
         }
         try self.pushV128(@bitCast(wide));
@@ -4031,11 +4031,11 @@ pub const Vm = struct {
     ) WasmError!void {
         const ma = try readMemarg(reader, instance);
         const lane = try reader.readByte();
-        var vec: @Vector(N, T) = @bitCast(self.popV128());
+        var arr: [N]T = @bitCast(self.popV128());
         const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
         const val = ma.mem.read(T, ma.offset, base) catch return error.OutOfBoundsMemoryAccess;
-        vec[lane] = val;
-        try self.pushV128(@bitCast(vec));
+        arr[lane] = val;
+        try self.pushV128(@bitCast(arr));
     }
 
     // SIMD helper: store a specific lane of v128 to memory
@@ -4048,9 +4048,9 @@ pub const Vm = struct {
     ) WasmError!void {
         const ma = try readMemarg(reader, instance);
         const lane = try reader.readByte();
-        const vec: @Vector(N, T) = @bitCast(self.popV128());
+        const arr: [N]T = @bitCast(self.popV128());
         const base: u64 = if (ma.mem.is_64) self.popU64() else @as(u32, @bitCast(self.popI32()));
-        ma.mem.write(T, ma.offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+        ma.mem.write(T, ma.offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
     }
 
     // SIMD helper: lane-wise comparison producing all-ones/all-zeros result
@@ -6889,48 +6889,48 @@ pub const Vm = struct {
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const bytes: [8]i8 = @bitCast(raw);
-                var result: @Vector(8, i16) = undefined;
-                for (0..8) |i| result[i] = bytes[i];
+                var result: [8]i16 = undefined;
+                inline for (0..8) |i| result[i] = bytes[i];
                 try self.pushV128(@bitCast(result));
             },
             0x02 => { // v128.load8x8_u
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const bytes: [8]u8 = @bitCast(raw);
-                var result: @Vector(8, u16) = undefined;
-                for (0..8) |i| result[i] = bytes[i];
+                var result: [8]u16 = undefined;
+                inline for (0..8) |i| result[i] = bytes[i];
                 try self.pushV128(@bitCast(result));
             },
             0x03 => { // v128.load16x4_s
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [4]i16 = @bitCast(raw);
-                var result: @Vector(4, i32) = undefined;
-                for (0..4) |i| result[i] = vals[i];
+                var result: [4]i32 = undefined;
+                inline for (0..4) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x04 => { // v128.load16x4_u
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [4]u16 = @bitCast(raw);
-                var result: @Vector(4, u32) = undefined;
-                for (0..4) |i| result[i] = vals[i];
+                var result: [4]u32 = undefined;
+                inline for (0..4) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x05 => { // v128.load32x2_s
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [2]i32 = @bitCast(raw);
-                var result: @Vector(2, i64) = undefined;
-                for (0..2) |i| result[i] = vals[i];
+                var result: [2]i64 = undefined;
+                inline for (0..2) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x06 => { // v128.load32x2_u
                 const base = @as(u32, @bitCast(self.popI32()));
                 const raw = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
                 const vals: [2]u32 = @bitCast(raw);
-                var result: @Vector(2, u64) = undefined;
-                for (0..2) |i| result[i] = vals[i];
+                var result: [2]u64 = undefined;
+                inline for (0..2) |i| result[i] = vals[i];
                 try self.pushV128(@bitCast(result));
             },
             0x07 => { // v128.load8_splat
@@ -6979,52 +6979,52 @@ pub const Vm = struct {
     fn executeSimdLaneMemOp(self: *Vm, sub: u32, offset: u32, wm: *WasmMemory, lane: u8) WasmError!void {
         switch (sub) {
             0x54 => { // v128.load8_lane: [i32, v128] → [v128]
-                var vec: @Vector(16, u8) = @bitCast(self.popV128());
+                var arr: [16]u8 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u8, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x55 => { // v128.load16_lane
-                var vec: @Vector(8, u16) = @bitCast(self.popV128());
+                var arr: [8]u16 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u16, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x56 => { // v128.load32_lane
-                var vec: @Vector(4, u32) = @bitCast(self.popV128());
+                var arr: [4]u32 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u32, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x57 => { // v128.load64_lane
-                var vec: @Vector(2, u64) = @bitCast(self.popV128());
+                var arr: [2]u64 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
                 const val = wm.read(u64, offset, base) catch return error.OutOfBoundsMemoryAccess;
-                vec[lane] = val;
-                try self.pushV128(@bitCast(vec));
+                arr[lane] = val;
+                try self.pushV128(@bitCast(arr));
             },
             0x58 => { // v128.store8_lane
-                const vec: @Vector(16, u8) = @bitCast(self.popV128());
+                const arr: [16]u8 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u8, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u8, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             0x59 => { // v128.store16_lane
-                const vec: @Vector(8, u16) = @bitCast(self.popV128());
+                const arr: [8]u16 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u16, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u16, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             0x5A => { // v128.store32_lane
-                const vec: @Vector(4, u32) = @bitCast(self.popV128());
+                const arr: [4]u32 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u32, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u32, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             0x5B => { // v128.store64_lane
-                const vec: @Vector(2, u64) = @bitCast(self.popV128());
+                const arr: [2]u64 = @bitCast(self.popV128());
                 const base = @as(u32, @bitCast(self.popI32()));
-                wm.write(u64, offset, base, vec[lane]) catch return error.OutOfBoundsMemoryAccess;
+                wm.write(u64, offset, base, arr[lane]) catch return error.OutOfBoundsMemoryAccess;
             },
             else => return error.Trap,
         }
